@@ -108,3 +108,4 @@ requirements.txt     Vercel reads this to detect FastAPI
 - Wire `elo.py` into a results-entry screen at `/admin/matches/new`
 - `/leaderboards` — one tab per game
 - `/players/{name}` — rating history
+ 
