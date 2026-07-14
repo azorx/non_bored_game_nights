@@ -10,8 +10,7 @@ to write.
 Route map
 ---------
   GET  /                    what's next, who's coming
-  GET  /players             everyone, and a form to add someone
-  POST /players             create a player
+  GET  /players             everyone who exists (read-only)
   GET  /s/{slug}            THE WHATSAPP LINK — sign-up page for one game night
   POST /s/{slug}/signup     sign up (find-or-create player, record game votes)
   POST /s/{slug}/withdraw   drop out
@@ -22,6 +21,7 @@ Route map
 
 import io
 import os
+import random
 import secrets
 import string
 from datetime import datetime
@@ -57,6 +57,18 @@ MIN_VOTES = 2
 # board game box shot on a phone, and it keeps the database small.
 IMAGE_MAX_WIDTH = 800
 IMAGE_MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+
+# Every player gets one of these, picked at random and never shared with another
+# player, so you can pick someone out of a sign-up list at a glance. They are
+# deliberately silhouette-distinct: no two brown four-legged animals, no near
+# duplicates that blur together at 16px on a phone.
+PLAYER_EMOJIS = [
+    "🦊", "🐙", "🦁", "🐸", "🦄", "🐝", "🦖", "🐢", "🦉", "🐧",
+    "🦩", "🐳", "🦋", "🐨", "🦔", "🦥", "🐬", "🦜", "🐊", "🦭",
+    "🦡", "🐺", "🦚", "🐡", "🐌", "🦇", "🐇", "🦈", "🐲", "🦂",
+    "🚀", "🍕", "🌮", "🎸", "👻", "🤖", "🧙", "🍄", "⚡", "🎩",
+    "🪐", "🧊", "🔥", "🌵", "🍩", "🥑", "🦞", "🎺", "🪩", "🧲",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -225,12 +237,26 @@ def process_upload(upload: UploadFile | None) -> tuple[bytes, str] | None:
     return buf.getvalue(), "image/jpeg"
 
 
+def pick_emoji() -> str:
+    """Pick a fun emoji nobody else has yet.
+
+    Uniqueness is best-effort, not a database constraint: once the pool runs
+    out (fifty players deep) we start reusing rather than refusing to create
+    the player. A duplicate icon is a much smaller problem than a failed
+    sign-up on a Friday night.
+    """
+    taken = {row["emoji"] for row in db.fetch_all("select emoji from players")}
+    unclaimed = [e for e in PLAYER_EMOJIS if e not in taken]
+    return random.choice(unclaimed or PLAYER_EMOJIS)
+
+
 def find_or_create_player(name: str) -> dict:
     """The heart of frictionless sign-up: a typed name is enough.
 
     Matching is case-insensitive, so "dave" tonight and "Dave" next month are
     the same person. ON CONFLICT keeps it safe even if two people submit at the
-    same instant.
+    same instant — and, because the conflict branch only touches the name, a
+    returning player keeps the emoji they already had.
     """
     name = " ".join(name.split())  # collapse stray whitespace
     if not name:
@@ -246,11 +272,11 @@ def find_or_create_player(name: str) -> dict:
 
     return db.fetch_one(
         """
-        insert into players (name) values (%s)
+        insert into players (name, emoji) values (%s, %s)
         on conflict (lower(name)) do update set name = players.name
         returning *
         """,
-        [name],
+        [name, pick_emoji()],
     )
 
 
@@ -281,7 +307,9 @@ def home(request: Request):
 
 
 @app.get("/players")
-def players_page(request: Request, created: str | None = None):
+def players_page(request: Request):
+    """Read-only roster. Players come into existence by signing up for a night,
+    so there is nothing to create here — this page just shows who exists."""
     people = db.fetch_all(
         """
         select p.*, count(s.id) as nights_attended
@@ -294,19 +322,8 @@ def players_page(request: Request, created: str | None = None):
     return templates.TemplateResponse(
         request=request,
         name="players.html",
-        context={"players": people, "created": created},
+        context={"players": people},
     )
-
-
-@app.post("/players")
-def create_player(name: str = Form(...), emoji: str = Form("🎲")):
-    player = find_or_create_player(name)
-    if emoji.strip():
-        db.execute(
-            "update players set emoji = %s where id = %s",
-            [emoji.strip()[:8], player["id"]],
-        )
-    return redirect(f"/players?created={player['name']}")
 
 
 def render_session(
@@ -484,6 +501,20 @@ def admin_login(passcode: str = Form(...)):
         secure=True,
         max_age=60 * 60 * 24 * 30,
     )
+    return response
+
+
+@app.post("/admin/logout")
+def admin_logout():
+    """Drop the admin cookie.
+
+    Deliberately a POST, not a GET: a GET that changes state can be triggered by
+    anything that fetches a URL — a link preview, a prefetcher, an <img> tag on
+    some other site. Logging out is harmless enough that it barely matters here,
+    but "actions are POSTs, reads are GETs" is a rule worth keeping unbroken.
+    """
+    response = redirect("/")
+    response.delete_cookie(ADMIN_COOKIE)
     return response
 
 
