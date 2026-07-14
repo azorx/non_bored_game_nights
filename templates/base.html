@@ -47,6 +47,13 @@
       background: var(--accent); color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
     }
     button.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); font-weight: 400; font-size: 0.85rem; padding: 0.3rem 0.7rem; margin: 0; }
+    .gamefilter { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+    .gamefilter button {
+      margin: 0; padding: 0.3rem 0.7rem; font-size: 0.8rem; font-weight: 400;
+      background: transparent; border: 1px solid var(--line); color: var(--muted);
+      border-radius: 99px; cursor: pointer;
+    }
+    .gamefilter button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
     .gamelist { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 0.75rem; }
     .gamecard {
       position: relative; display: flex; gap: 0.9rem; align-items: flex-start; margin: 0;
@@ -95,5 +102,26 @@
     </header>
     {% block content %}{% endblock %}
   </div>
+
+  <script>
+    // Filter the game list by mode. Purely a show/hide of cards already on the
+    // page, so it needs no server round-trip and, on the sign-up page, leaves
+    // any ticked-but-hidden game still ticked and still submitted. Harmless on
+    // pages that have no filter bar.
+    (function () {
+      const bar = document.querySelector('.gamefilter');
+      if (!bar) return;
+      const cards = document.querySelectorAll('.gamelist .gamecard');
+      bar.addEventListener('click', function (e) {
+        const btn = e.target.closest('button[data-filter]');
+        if (!btn) return;
+        bar.querySelectorAll('button').forEach(b => b.classList.toggle('active', b === btn));
+        const want = btn.dataset.filter;
+        cards.forEach(c => {
+          c.style.display = (want === 'all' || c.dataset.mode === want) ? '' : 'none';
+        });
+      });
+    })();
+  </script>
 </body>
 </html>

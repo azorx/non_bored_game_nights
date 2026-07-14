@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_filter.html" as filters %}
 {% block title %}{{ session.title }}{% endblock %}
 {% block og_title %}{{ session.title }}{% endblock %}
 {% block og_desc %}{{ session.scheduled_for.strftime('%a %-d %b, %H:%M') }}{% if session.location %} · {{ session.location }}{% endif %} — tap to sign up.{% endblock %}
@@ -42,9 +43,11 @@
 
   <h2>Pick your games <span class="muted" style="font-weight:400">— at least {{ min_votes }}</span></h2>
 
+  {{ filters.game_filter(games) }}
+
   <div class="gamelist">
     {% for g in games %}
-      <label class="gamecard" for="game-{{ g.id }}">
+      <label class="gamecard" for="game-{{ g.id }}" data-mode="{{ g.mode }}">
         <input type="checkbox" id="game-{{ g.id }}" name="game_ids" value="{{ g.id }}"
                {% if g.id|string in form_games %}checked{% endif %}>
         <div class="gamecard-media">

@@ -1,0 +1,20 @@
+{# A row of "filter by game mode" pills. Wired up by the script in base.html,
+   which shows/hides the .gamelist cards by their data-mode. Only rendered when
+   there is more than one mode to choose between — a filter over a single type
+   would just be clutter. Modes appear in a fixed, sensible order. #}
+{% macro game_filter(games) %}
+  {% set ns = namespace(present=[]) %}
+  {% for m in ['ffa', 'duel', 'team', 'coop'] %}
+    {% if games | selectattr('mode', 'equalto', m) | list | length %}
+      {% set ns.present = ns.present + [m] %}
+    {% endif %}
+  {% endfor %}
+  {% if ns.present | length > 1 %}
+    <div class="gamefilter">
+      <button type="button" data-filter="all" class="active">All</button>
+      {% for m in ns.present %}
+        <button type="button" data-filter="{{ m }}">{{ mode_label(m) | capitalize }}</button>
+      {% endfor %}
+    </div>
+  {% endif %}
+{% endmacro %}

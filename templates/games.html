@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_filter.html" as filters %}
 {% block title %}Games{% endblock %}
 {% block content %}
 
@@ -12,9 +13,11 @@
   </div>
 {% endif %}
 
+{{ filters.game_filter(games) }}
+
 <div class="gamelist">
   {% for g in games %}
-    <div class="gamecard" style="cursor:default">
+    <div class="gamecard" data-mode="{{ g.mode }}" style="cursor:default">
       <div class="gamecard-media">
         {% if g.has_image %}
           <img src="/games/{{ g.id }}/image" alt="{{ g.name }}" loading="lazy">
