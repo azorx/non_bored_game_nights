@@ -29,6 +29,11 @@
     nav { margin-left: auto; display: flex; gap: 1rem; }
     nav a { color: var(--muted); text-decoration: none; font-size: 0.9rem; }
     nav a:hover { color: var(--ink); }
+    nav .navlink {
+      background: none; border: 0; padding: 0; margin: 0; font: inherit;
+      color: var(--muted); font-size: 0.9rem; cursor: pointer;
+    }
+    nav .navlink:hover { color: var(--ink); }
     h1 { font-size: 1.6rem; margin: 0 0 0.25rem; }
     h2 { font-size: 1.1rem; margin: 2rem 0 0.75rem; font-weight: 600; }
     .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem 1.25rem; margin-bottom: 0.75rem; }
@@ -97,7 +102,12 @@
         <a href="/games">Games</a>
         <a href="/leaderboard">Leaderboard</a>
         <a href="/players">Players</a>
-        {% if is_admin(request) %}<a href="/admin">Admin</a>{% endif %}
+        {% if is_admin(request) %}
+          <a href="/admin">Admin</a>
+          <form method="post" action="/admin/logout" style="margin:0; display:inline">
+            <button type="submit" class="navlink" title="See the site as your friends do">Sign out</button>
+          </form>
+        {% endif %}
       </nav>
     </header>
     {% block content %}{% endblock %}
