@@ -1,10 +1,10 @@
--- Non-Bored Game Nights — schema
+-- Non-Bored Game Nights — one-shot schema bootstrap
 -- Run this once in the Neon SQL Editor (Console -> your project -> SQL Editor).
--- Safe to re-run: everything is IF NOT EXISTS.
+-- Safe to re-run: it uses IF NOT EXISTS / ALTER TABLE ... ADD COLUMN IF NOT EXISTS
+-- and is designed to work as a single initialization script.
 --
--- Phases 1-2 use: players, games, sessions, signups, signup_games.
--- The match tables at the bottom are unused for now, but they are cheap to
--- create and defining them up front saves a migration later.
+-- This file combines the original base schema plus the later migration-style
+-- changes from the other SQL files so a fresh database can be created in one go.
 
 -- ---------------------------------------------------------------------------
 -- People
@@ -45,6 +45,15 @@ create table if not exists games (
 create unique index if not exists games_name_lower_idx
     on games (lower(name));
 
+-- Migration 002: game media and description
+alter table games add column if not exists description text;
+alter table games add column if not exists image       bytea;
+alter table games add column if not exists image_type  text;
+
+-- Migration 003: typical game duration
+alter table games add column if not exists duration_minutes int
+    check (duration_minutes is null or duration_minutes between 1 and 600);
+
 
 -- ---------------------------------------------------------------------------
 -- Sessions (one game night)
@@ -65,6 +74,10 @@ create table if not exists sessions (
 
 create index if not exists sessions_scheduled_idx
     on sessions (scheduled_for desc);
+
+-- Migration 005: seat cap per session
+alter table sessions add column if not exists seats int not null default 6
+    check (seats >= 1);
 
 
 -- ---------------------------------------------------------------------------
@@ -125,3 +138,44 @@ create table if not exists ratings (
     updated_at   timestamptz      not null default now(),
     primary key (player_id, game_id)
 );
+
+-- The summary view that the app expects for the game list.
+create or replace view games_summary as
+select
+    id,
+    name,
+    mode,
+    min_players,
+    max_players,
+    active,
+    description,
+    duration_minutes,
+    created_at,
+    (image is not null) as has_image
+from games;
+
+-- Migration 004: assign a fun default emoji to any players still on the fallback.
+with pool as (
+    select unnest(array[
+        '🦊','🐙','🦁','🐸','🦄','🐝','🦖','🐢','🦉','🐧',
+        '🦩','🐳','🦋','🐨','🦔','🦥','🐬','🦜','🐊','🦭',
+        '🦡','🐺','🦚','🐡','🐌','🦇','🐇','🦈','🐲','🦂',
+        '🚀','🍕','🌮','🎸','👻','🤖','🧙','🍄','⚡','🎩',
+        '🪐','🧊','🔥','🌵','🍩','🥑','🦞','🎺','🪩','🧲'
+    ]) as emoji
+),
+free as (
+    select emoji, row_number() over (order by random()) as rn
+    from pool
+    where emoji not in (select emoji from players where emoji <> '🎲')
+),
+targets as (
+    select id, row_number() over (order by random()) as rn
+    from players
+    where emoji = '🎲'
+)
+update players p
+   set emoji = free.emoji
+  from targets
+  join free on free.rn = targets.rn
+ where p.id = targets.id;

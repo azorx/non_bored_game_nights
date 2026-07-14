@@ -13,7 +13,8 @@ traffic levels the difference is unmeasurable. Neon's *pooled* connection string
 """
 
 import os
-from typing import Any, Sequence
+from contextlib import contextmanager
+from typing import Any, Iterator, Sequence
 
 import psycopg
 from psycopg.rows import dict_row
@@ -62,3 +63,17 @@ def execute(sql: str, params: Sequence[Any] | None = None) -> None:
     with connect() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         conn.commit()
+
+
+@contextmanager
+def transaction() -> Iterator[psycopg.Cursor]:
+    """A cursor whose statements all commit together, or not at all.
+
+    For the handful of operations that must be atomic — recomputing a whole
+    game's Elo ladder is the one that matters — where the per-statement helpers
+    above would each be their own transaction and could leave the ratings
+    half-written if something failed midway. The connection context commits on a
+    clean exit and rolls back on any exception.
+    """
+    with connect() as conn, conn.cursor() as cur:
+        yield cur

@@ -34,6 +34,7 @@ from fastapi.templating import Jinja2Templates
 from PIL import Image
 
 import db
+import elo
 
 load_dotenv()  # Reads .env locally. On Vercel, env vars come from the dashboard.
 
@@ -377,6 +378,82 @@ def games_page(request: Request):
     )
 
 
+@app.get("/leaderboard")
+def leaderboard_page(
+    request: Request, game: str | None = None, saved: str | None = None
+):
+    """One ladder per game, chosen from a dropdown.
+
+    The list is every game, not just the active ones: a retired game keeps its
+    leaderboard forever, so it must stay selectable here even though it has
+    dropped off the sign-up page. With nothing chosen we default to the first
+    game so the page is never a bare dropdown.
+    """
+    games = db.fetch_all(
+        "select id, name, mode, has_image from games_summary order by lower(name)"
+    )
+    selected_id = game or (games[0]["id"] if games else None)
+
+    selected = None
+    standings: list[dict] = []
+    recent: list[dict] = []
+    if selected_id is not None:
+        selected = db.fetch_one(
+            "select * from games_summary where id = %s", [selected_id]
+        )
+        if selected is None:
+            raise HTTPException(status_code=404, detail="No such game")
+
+        standings = db.fetch_all(
+            """
+            select p.name, p.emoji, r.rating, r.games_played
+            from ratings r
+            join players p on p.id = r.player_id
+            where r.game_id = %s
+            order by r.rating desc, r.games_played desc, lower(p.name)
+            """,
+            [selected_id],
+        )
+
+        # The last few results, each collapsed into one row via json_agg so the
+        # template gets a match with its players already attached — and the
+        # rating swing (after minus before) for a bit of drama.
+        recent = db.fetch_all(
+            """
+            select m.played_at,
+                   json_agg(
+                       json_build_object(
+                           'name', p.name,
+                           'emoji', p.emoji,
+                           'placement', mp.placement,
+                           'team', mp.team,
+                           'delta', mp.rating_after - mp.rating_before
+                       ) order by mp.placement
+                   ) as players
+            from matches m
+            join match_players mp on mp.match_id = m.id
+            join players p on p.id = mp.player_id
+            where m.game_id = %s
+            group by m.id
+            order by m.played_at desc, m.created_at desc
+            limit 5
+            """,
+            [selected_id],
+        )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="leaderboard.html",
+        context={
+            "games": games,
+            "selected": selected,
+            "standings": standings,
+            "recent": recent,
+            "saved": saved,
+        },
+    )
+
+
 @app.get("/s/{slug}")
 def session_page(request: Request, slug: str, joined: str | None = None):
     """This is the URL you paste into WhatsApp."""
@@ -712,6 +789,113 @@ def update_game(
         )
 
     return redirect("/admin/games")
+
+
+# ---------------------------------------------------------------------------
+# Results — turning a game night into ratings
+# ---------------------------------------------------------------------------
+
+
+@app.get("/admin/results", dependencies=[Depends(require_admin)])
+def results_form(request: Request):
+    """Enter what happened at the table: who played a game and where they
+    finished. Active games only — you record results against games you still
+    offer; a retired game's history is read-only from here on."""
+    return templates.TemplateResponse(
+        request=request,
+        name="admin_results.html",
+        context={
+            "games": active_games(),
+            "players": db.fetch_all("select name from players order by lower(name)"),
+            "sessions": db.fetch_all(
+                "select id, title, scheduled_for from sessions "
+                "order by scheduled_for desc limit 20"
+            ),
+        },
+    )
+
+
+@app.post("/admin/results", dependencies=[Depends(require_admin)])
+async def record_results(request: Request):
+    """Record one game's result and rebuild that game's ladder.
+
+    Read from the raw form because the player rows arrive as parallel repeated
+    fields (player_name=..&placement=..&team=..). Rows with a blank name are
+    dropped, so the admin can leave spare rows lying around in the form.
+
+    Players are found-or-created by typed name, exactly like sign-up: someone can
+    appear in a result without ever having formally signed up for the night.
+    """
+    form = await request.form()
+    game_id = form.get("game_id")
+    session_id = (form.get("session_id") or "").strip() or None
+
+    game = db.fetch_one("select id, name, mode from games where id = %s", [game_id])
+    if game is None:
+        raise HTTPException(status_code=400, detail="Pick a game")
+
+    names = form.getlist("player_name")
+    placements = form.getlist("placement")
+    teams = form.getlist("team")
+
+    rows: list[tuple[str, int, str | None]] = []
+    for i, raw_name in enumerate(names):
+        name = (raw_name or "").strip()
+        if not name:
+            continue
+        try:
+            placement = int(placements[i])
+        except (IndexError, ValueError):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{name} needs a finishing position (1 = winner)",
+            )
+        if placement < 1:
+            raise HTTPException(status_code=400, detail="Positions start at 1")
+        team = (teams[i].strip() if i < len(teams) else "") or None
+        rows.append((name, placement, team))
+
+    if len(rows) < 2:
+        raise HTTPException(status_code=400, detail="A result needs at least two players")
+
+    # Mode-specific sanity checks — the same three modes the rating engine and
+    # games.html know about. Nothing here is load-bearing for the maths (the
+    # engine copes either way); it just stops obviously wrong results going in.
+    if game["mode"] == "duel" and len(rows) != 2:
+        raise HTTPException(
+            status_code=400, detail="A head-to-head game has exactly two players"
+        )
+    if game["mode"] == "team":
+        if any(team is None for _, _, team in rows):
+            raise HTTPException(
+                status_code=400, detail="Give every player a team name"
+            )
+        if len({team for _, _, team in rows}) < 2:
+            raise HTTPException(
+                status_code=400, detail="A team game needs at least two teams"
+            )
+
+    match = db.fetch_one(
+        "insert into matches (game_id, session_id) values (%s, %s) returning id",
+        [game["id"], session_id],
+    )
+    for name, placement, team in rows:
+        player = find_or_create_player(name)
+        db.execute(
+            """
+            insert into match_players (match_id, player_id, placement, team)
+            values (%s, %s, %s, %s)
+            on conflict (match_id, player_id)
+            do update set placement = excluded.placement, team = excluded.team
+            """,
+            [match["id"], player["id"], placement, team],
+        )
+
+    # Replay the whole game so the new match and every rating it touches land
+    # together and consistently.
+    elo.recompute_game(game["id"])
+
+    return redirect(f"/leaderboard?game={game['id']}&saved={game['name']}")
 
 
 # ---------------------------------------------------------------------------

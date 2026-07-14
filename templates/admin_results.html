@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block title %}Enter results{% endblock %}
+{% block content %}
+
+<h1>Enter results</h1>
+<p class="muted">
+  Record who played and where they finished. Saving updates that game's Elo
+  ladder — and the maths follows the game's mode, so a duel, a free-for-all and a
+  team game each score the way they should.
+</p>
+
+<div class="card">
+  <form method="post" action="/admin/results" id="results-form">
+
+    <label for="game_id">Game</label>
+    <select id="game_id" name="game_id" required>
+      <option value="" disabled selected>Choose a game…</option>
+      {% for g in games %}
+        <option value="{{ g.id }}" data-mode="{{ g.mode }}">
+          {{ g.name }} — {% if g.mode == 'ffa' %}free-for-all{% elif g.mode == 'duel' %}head to head{% else %}teams{% endif %}
+        </option>
+      {% endfor %}
+    </select>
+
+    <label for="session_id">Which night? <span class="muted">(optional)</span></label>
+    <select id="session_id" name="session_id">
+      <option value="">— not linked to a night —</option>
+      {% for s in sessions %}
+        <option value="{{ s.id }}">{{ s.title }} · {{ s.scheduled_for.strftime('%-d %b') }}</option>
+      {% endfor %}
+    </select>
+
+    <h2 style="margin-bottom:.25rem">Players</h2>
+    <p class="muted" style="font-size:.85rem; margin:0" id="mode-hint">
+      1 = winner. Give tied players the same position.
+    </p>
+
+    <datalist id="known-players">
+      {% for p in players %}<option value="{{ p.name }}">{% endfor %}
+    </datalist>
+
+    <div id="rows"></div>
+
+    <div style="display:flex; gap:.5rem; align-items:center">
+      <button type="button" class="ghost" id="add-row" style="margin-top:.75rem">+ Add player</button>
+    </div>
+
+    <button type="submit">Save results &amp; update ladder</button>
+  </form>
+</div>
+
+{% if not games %}
+  <p class="muted">No active games to record against. Add one on the games page first.</p>
+{% endif %}
+
+<template id="row-template">
+  <div class="result-row" style="display:flex; gap:.5rem; align-items:center; margin-top:.5rem">
+    <input type="text" name="player_name" list="known-players" placeholder="Name"
+           autocomplete="off" maxlength="40" style="flex:1">
+    <input type="text" name="team" placeholder="Team" maxlength="20"
+           class="team-field" style="flex:0 0 5.5rem; display:none">
+    <input type="number" name="placement" placeholder="#" min="1" max="50"
+           title="Finishing position — 1 is the winner" style="flex:0 0 4rem">
+    <button type="button" class="ghost remove-row" title="Remove"
+            style="margin:0; flex:0 0 auto">✕</button>
+  </div>
+</template>
+
+<script>
+  const rows = document.getElementById('rows');
+  const tpl = document.getElementById('row-template');
+  const gameSel = document.getElementById('game_id');
+  const modeHint = document.getElementById('mode-hint');
+
+  function currentMode() {
+    const opt = gameSel.selectedOptions[0];
+    return opt ? opt.dataset.mode : null;
+  }
+
+  const addBtn = document.getElementById('add-row');
+
+  function applyMode() {
+    const mode = currentMode();
+    const isTeam = mode === 'team';
+    const isDuel = mode === 'duel';
+
+    document.querySelectorAll('.team-field').forEach(f => {
+      f.style.display = isTeam ? '' : 'none';
+    });
+
+    // Head to head is strictly two-sided: cap the form at two rows and hide the
+    // "add player" button so you can't build an invalid result in the first
+    // place. Extra rows are trimmed from the end when you switch into duel mode.
+    if (isDuel) {
+      while (rows.children.length > 2) rows.lastElementChild.remove();
+    }
+    addBtn.style.display = isDuel ? 'none' : '';
+
+    if (isDuel) {
+      modeHint.textContent = 'Head to head — exactly two players. 1 = winner, 2 = loser (both 1 for a draw).';
+    } else if (isTeam) {
+      modeHint.textContent = 'Teams — name each player’s team. Teammates share a finishing position.';
+    } else {
+      modeHint.textContent = '1 = winner. Give tied players the same position.';
+    }
+  }
+
+  function addRow(place) {
+    const node = tpl.content.firstElementChild.cloneNode(true);
+    if (place) node.querySelector('input[name=placement]').value = place;
+    rows.appendChild(node);
+    applyMode();
+  }
+
+  rows.addEventListener('click', e => {
+    if (e.target.classList.contains('remove-row') && rows.children.length > 2) {
+      e.target.closest('.result-row').remove();
+    }
+  });
+  addBtn.addEventListener('click', () => {
+    if (currentMode() !== 'duel') addRow();
+  });
+  gameSel.addEventListener('change', applyMode);
+
+  // Two rows to start — the smallest valid result.
+  addRow(1);
+  addRow(2);
+</script>
+
+{% endblock %}

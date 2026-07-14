@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}Leaderboard{% endblock %}
+{% block content %}
+
+<h1>Leaderboard</h1>
+
+{% if saved %}
+  <div class="flash">Results saved — {{ saved }}'s ladder is updated.</div>
+{% endif %}
+
+{% if not games %}
+  <div class="card"><p class="muted" style="margin:0">No games yet.</p></div>
+{% else %}
+
+<div class="card">
+  <label for="game-picker">Pick a game</label>
+  <select id="game-picker"
+          onchange="if (this.value) location = '/leaderboard?game=' + this.value">
+    {% for g in games %}
+      <option value="{{ g.id }}" {% if selected and g.id == selected.id %}selected{% endif %}>
+        {{ g.name }}
+      </option>
+    {% endfor %}
+  </select>
+</div>
+
+{% if selected %}
+  <h2 style="display:flex; align-items:center; gap:.6rem">
+    {% if selected.has_image %}
+      <img src="/games/{{ selected.id }}/image" alt=""
+           style="width:40px; height:40px; object-fit:cover; border-radius:8px">
+    {% endif %}
+    {{ selected.name }}
+    <span class="pill" style="font-weight:400">
+      {% if selected.mode == 'ffa' %}free-for-all{% elif selected.mode == 'duel' %}head to head{% else %}teams{% endif %}
+    </span>
+  </h2>
+
+  {% if standings %}
+    <div class="card">
+      <table>
+        <tr>
+          <th style="width:2.5rem">#</th>
+          <th>Player</th>
+          <th style="text-align:right">Rating</th>
+          <th style="text-align:right">Played</th>
+        </tr>
+        {% for r in standings %}
+          <tr>
+            <td class="muted">{{ loop.index }}</td>
+            <td>
+              <span style="font-size:1.15rem; margin-right:.35rem">{{ r.emoji }}</span>{{ r.name }}
+            </td>
+            <td style="text-align:right; font-variant-numeric:tabular-nums">{{ r.rating|round|int }}</td>
+            <td style="text-align:right" class="muted">{{ r.games_played }}</td>
+          </tr>
+        {% endfor %}
+      </table>
+    </div>
+  {% else %}
+    <div class="card">
+      <p class="muted" style="margin:0">
+        No results recorded yet.
+        {% if is_admin(request) %}
+          <a href="/admin/results" style="color:var(--accent)">Enter the first one</a>.
+        {% endif %}
+      </p>
+    </div>
+  {% endif %}
+
+  {% if recent %}
+    <h2>Recent games</h2>
+    {% for m in recent %}
+      <div class="card">
+        <div class="muted" style="font-size:.8rem">{{ m.played_at.strftime('%a %-d %b, %H:%M') }}</div>
+        <table style="margin-top:.3rem">
+          {% for pl in m.players %}
+            <tr>
+              <td class="muted" style="width:2rem">{{ pl.placement }}</td>
+              <td>
+                {{ pl.emoji }} {{ pl.name }}
+                {% if pl.team %}<span class="pill">{{ pl.team }}</span>{% endif %}
+              </td>
+              <td style="text-align:right; font-variant-numeric:tabular-nums;
+                         color: {% if pl.delta >= 0 %}var(--good){% else %}#e08c9e{% endif %}">
+                {{ '+' if pl.delta >= 0 else '' }}{{ pl.delta|round|int }}
+              </td>
+            </tr>
+          {% endfor %}
+        </table>
+      </div>
+    {% endfor %}
+  {% endif %}
+{% endif %}
+
+{% endif %}
+
+{% endblock %}
