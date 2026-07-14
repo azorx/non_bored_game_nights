@@ -5,13 +5,38 @@
 <h1>Leaderboard</h1>
 
 {% if saved %}
-  <div class="flash">Results saved — {{ saved }}'s ladder is updated.</div>
+  <div class="flash">Results saved — {{ saved }}'s board is updated.</div>
 {% endif %}
 
 {% if not games %}
   <div class="card"><p class="muted" style="margin:0">No games yet.</p></div>
 {% else %}
 
+{# ---- Titles currently held ------------------------------------------------ #}
+<h2>Titles held</h2>
+{% if titles %}
+  <div class="card">
+    <table>
+      {% for t in titles %}
+        <tr>
+          <td>
+            <strong>{{ t.title }}</strong>
+            {% if t.subtitle %}<div class="muted" style="font-size:.75rem">{{ t.subtitle }}</div>{% endif %}
+          </td>
+          <td>
+            <span style="font-size:1.15rem; margin-right:.35rem">{{ t.holder.emoji }}</span>{{ t.holder.name }}
+          </td>
+          <td style="text-align:right" class="muted">{{ t.detail }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+  </div>
+{% else %}
+  <div class="card"><p class="muted" style="margin:0">No titles held yet — play some games and record the results.</p></div>
+{% endif %}
+
+{# ---- Per-game board ------------------------------------------------------- #}
+<h2>By game</h2>
 <div class="card">
   <label for="game-picker">Pick a game</label>
   <select id="game-picker"
@@ -31,36 +56,53 @@
            style="width:40px; height:40px; object-fit:cover; border-radius:8px">
     {% endif %}
     {{ selected.name }}
-    <span class="pill" style="font-weight:400">
-      {% if selected.mode == 'ffa' %}free-for-all{% elif selected.mode == 'duel' %}head to head{% else %}teams{% endif %}
-    </span>
+    <span class="pill" style="font-weight:400">{{ mode_label(selected.mode) }}</span>
   </h2>
 
   {% if standings %}
     <div class="card">
       <table>
-        <tr>
-          <th style="width:2.5rem">#</th>
-          <th>Player</th>
-          <th style="text-align:right">Rating</th>
-          <th style="text-align:right">Played</th>
-        </tr>
-        {% for r in standings %}
+        {% if is_coop %}
           <tr>
-            <td class="muted">{{ loop.index }}</td>
-            <td>
-              <span style="font-size:1.15rem; margin-right:.35rem">{{ r.emoji }}</span>{{ r.name }}
-            </td>
-            <td style="text-align:right; font-variant-numeric:tabular-nums">{{ r.rating|round|int }}</td>
-            <td style="text-align:right" class="muted">{{ r.games_played }}</td>
+            <th style="width:2.5rem">#</th>
+            <th>Player</th>
+            <th style="text-align:right">Win rate</th>
+            <th style="text-align:right">W / P</th>
           </tr>
-        {% endfor %}
+          {% for r in standings %}
+            <tr>
+              <td class="muted">{{ loop.index }}</td>
+              <td><span style="font-size:1.15rem; margin-right:.35rem">{{ r.emoji }}</span>{{ r.name }}</td>
+              <td style="text-align:right; font-variant-numeric:tabular-nums">{{ (r.win_rate * 100)|round|int }}%</td>
+              <td style="text-align:right" class="muted">{{ r.wins }} / {{ r.plays }}</td>
+            </tr>
+          {% endfor %}
+        {% else %}
+          <tr>
+            <th style="width:2.5rem">#</th>
+            <th>Player</th>
+            <th style="text-align:right">Rating</th>
+            <th style="text-align:right">Played</th>
+          </tr>
+          {% for r in standings %}
+            <tr>
+              <td class="muted">{{ loop.index }}</td>
+              <td><span style="font-size:1.15rem; margin-right:.35rem">{{ r.emoji }}</span>{{ r.name }}</td>
+              <td style="text-align:right; font-variant-numeric:tabular-nums">{{ r.rating|round|int }}</td>
+              <td style="text-align:right" class="muted">{{ r.games_played }}</td>
+            </tr>
+          {% endfor %}
+        {% endif %}
       </table>
     </div>
   {% else %}
     <div class="card">
       <p class="muted" style="margin:0">
-        No results recorded yet.
+        {% if is_coop %}
+          No games recorded yet.
+        {% else %}
+          No results recorded yet.
+        {% endif %}
         {% if is_admin(request) %}
           <a href="/admin/results" style="color:var(--accent)">Enter the first one</a>.
         {% endif %}
@@ -68,26 +110,46 @@
     </div>
   {% endif %}
 
+  {% if is_coop and provisional %}
+    <p class="muted" style="font-size:.85rem">
+      Still qualifying (needs {{ coop_min_games }} games):
+      {% for r in provisional %}{{ r.emoji }} {{ r.name }} ({{ r.wins }}/{{ r.plays }}){% if not loop.last %}, {% endif %}{% endfor %}
+    </p>
+  {% endif %}
+
   {% if recent %}
     <h2>Recent games</h2>
     {% for m in recent %}
       <div class="card">
         <div class="muted" style="font-size:.8rem">{{ m.played_at.strftime('%a %-d %b, %H:%M') }}</div>
-        <table style="margin-top:.3rem">
-          {% for pl in m.players %}
-            <tr>
-              <td class="muted" style="width:2rem">{{ pl.placement }}</td>
-              <td>
-                {{ pl.emoji }} {{ pl.name }}
-                {% if pl.team %}<span class="pill">{{ pl.team }}</span>{% endif %}
-              </td>
-              <td style="text-align:right; font-variant-numeric:tabular-nums;
-                         color: {% if pl.delta >= 0 %}var(--good){% else %}#e08c9e{% endif %}">
-                {{ '+' if pl.delta >= 0 else '' }}{{ pl.delta|round|int }}
-              </td>
-            </tr>
-          {% endfor %}
-        </table>
+        {% if is_coop %}
+          {# One shared outcome: placement 1 means the table won. #}
+          {% set won = m.players[0].placement == 1 %}
+          <div style="margin-top:.3rem">
+            <span class="pill" style="{% if won %}background:#1e3a2c; color:#b9f0d3{% else %}background:#3a1e26; color:#f0b9c6{% endif %}">
+              {{ 'Won 🎉' if won else 'Lost' }}
+            </span>
+            {% for pl in m.players %}
+              <span class="pill">{{ pl.emoji }} {{ pl.name }}</span>
+            {% endfor %}
+          </div>
+        {% else %}
+          <table style="margin-top:.3rem">
+            {% for pl in m.players %}
+              <tr>
+                <td class="muted" style="width:2rem">{{ pl.placement }}</td>
+                <td>
+                  {{ pl.emoji }} {{ pl.name }}
+                  {% if pl.team %}<span class="pill">{{ pl.team }}</span>{% endif %}
+                </td>
+                <td style="text-align:right; font-variant-numeric:tabular-nums;
+                           color: {% if pl.delta >= 0 %}var(--good){% else %}#e08c9e{% endif %}">
+                  {{ '+' if pl.delta >= 0 else '' }}{{ pl.delta|round|int }}
+                </td>
+              </tr>
+            {% endfor %}
+          </table>
+        {% endif %}
       </div>
     {% endfor %}
   {% endif %}

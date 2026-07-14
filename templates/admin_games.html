@@ -36,6 +36,7 @@
       <option value="ffa">Free-for-all</option>
       <option value="duel">Head to head</option>
       <option value="team">Teams</option>
+      <option value="coop">Cooperative</option>
     </select>
 
     <label for="gmin">Min players</label>
@@ -89,6 +90,7 @@
       <option value="ffa"  {% if g.mode == 'ffa'  %}selected{% endif %}>Free-for-all</option>
       <option value="duel" {% if g.mode == 'duel' %}selected{% endif %}>Head to head</option>
       <option value="team" {% if g.mode == 'team' %}selected{% endif %}>Teams</option>
+      <option value="coop" {% if g.mode == 'coop' %}selected{% endif %}>Cooperative</option>
     </select>
 
     <label>Min players</label>

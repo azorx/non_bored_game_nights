@@ -3,6 +3,10 @@
 
 <h1>Admin</h1>
 
+{% if deleted == 'night' %}
+  <div class="flash">Game night deleted, along with the results played that night. Affected leaderboards were recalculated.</div>
+{% endif %}
+
 <h2>New game night</h2>
 <div class="card">
   <form method="post" action="/admin/sessions">
@@ -35,6 +39,10 @@
           <button type="submit" name="status" value="{{ st }}" class="ghost">Mark {{ st }}</button>
         {% endif %}
       {% endfor %}
+    </form>
+    <form method="post" action="/admin/sessions/{{ s.id }}/delete" style="margin-top:.25rem"
+          onsubmit="return confirm('Delete “{{ s.title }}” and every result played that night? The leaderboards will be recalculated as if it never happened.');">
+      <button type="submit" class="ghost" style="color:#e08c9e; border-color:#5a3440">Delete night</button>
     </form>
   </div>
 {% endfor %}

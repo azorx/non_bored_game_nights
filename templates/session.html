@@ -58,7 +58,7 @@
           <strong>{{ g.name }}</strong>
           <div class="muted" style="font-size:.75rem">
             {{ g.min_players }}–{{ g.max_players }} players ·
-            {% if g.mode == 'ffa' %}free-for-all{% elif g.mode == 'duel' %}head to head{% else %}teams{% endif %}
+            {{ mode_label(g.mode) }}
             {% if g.duration_minutes %} · ~{{ g.duration_minutes }} min{% endif %}
           </div>
           {% if g.description %}

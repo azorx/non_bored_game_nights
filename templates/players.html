@@ -3,14 +3,30 @@
 
 <h1>Players</h1>
 
+{% if deleted %}
+  <div class="flash">Player deleted, along with any results they were part of.</div>
+{% endif %}
+
 {% if players %}
 <div class="card">
   <table>
-    <tr><th>Who</th><th style="text-align:right">Nights signed up</th></tr>
+    <tr>
+      <th>Who</th>
+      <th style="text-align:right">Nights signed up</th>
+      {% if is_admin(request) %}<th></th>{% endif %}
+    </tr>
     {% for p in players %}
       <tr>
         <td><span style="font-size:1.15rem; margin-right:.35rem">{{ p.emoji }}</span>{{ p.name }}</td>
         <td style="text-align:right" class="muted">{{ p.nights_attended }}</td>
+        {% if is_admin(request) %}
+        <td style="text-align:right; width:1%">
+          <form method="post" action="/admin/players/{{ p.id }}/delete" style="margin:0"
+                onsubmit="return confirm('Delete {{ p.name }} for good? This removes them from every result they played, and the affected leaderboards are recalculated.');">
+            <button type="submit" class="ghost" style="color:#e08c9e; border-color:#5a3440">Delete</button>
+          </form>
+        </td>
+        {% endif %}
       </tr>
     {% endfor %}
   </table>

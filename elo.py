@@ -115,6 +115,15 @@ def recompute_game(game_id) -> None:
             return
         mode = game["mode"]
 
+        # Co-op games carry no Elo — their board is win rate, read straight from
+        # the matches. Never write ratings for one. Clearing any that exist keeps
+        # this safe even if a game was flipped to co-op after being played, and
+        # makes it harmless for the delete routes to call recompute on every
+        # affected game without first checking the mode.
+        if mode == "coop":
+            cur.execute("delete from ratings where game_id = %s", [game_id])
+            return
+
         cur.execute(
             "select id from matches where game_id = %s "
             "order by played_at, created_at",

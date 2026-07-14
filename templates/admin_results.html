@@ -4,9 +4,9 @@
 
 <h1>Enter results</h1>
 <p class="muted">
-  Record who played and where they finished. Saving updates that game's Elo
-  ladder — and the maths follows the game's mode, so a duel, a free-for-all and a
-  team game each score the way they should.
+  Record who played and how it went. The maths follows the game's mode: a duel, a
+  free-for-all and a team game each score their own way, and a cooperative game
+  just banks whether the table won or lost.
 </p>
 
 <div class="card">
@@ -17,7 +17,7 @@
       <option value="" disabled selected>Choose a game…</option>
       {% for g in games %}
         <option value="{{ g.id }}" data-mode="{{ g.mode }}">
-          {{ g.name }} — {% if g.mode == 'ffa' %}free-for-all{% elif g.mode == 'duel' %}head to head{% else %}teams{% endif %}
+          {{ g.name }} — {{ mode_label(g.mode) }}
         </option>
       {% endfor %}
     </select>
@@ -29,6 +29,19 @@
         <option value="{{ s.id }}">{{ s.title }} · {{ s.scheduled_for.strftime('%-d %b') }}</option>
       {% endfor %}
     </select>
+
+    <!-- Co-op only: the whole table's shared outcome. Hidden for other modes. -->
+    <div id="coop-outcome" style="display:none">
+      <label>How did the table do?</label>
+      <div style="display:flex; gap:.5rem">
+        <label class="outcome-opt" style="flex:1; display:flex; align-items:center; gap:.4rem; margin:0; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:.55rem .75rem; cursor:pointer">
+          <input type="radio" name="coop_outcome" value="won" style="width:auto; accent-color:var(--good)"> Won 🎉
+        </label>
+        <label class="outcome-opt" style="flex:1; display:flex; align-items:center; gap:.4rem; margin:0; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:.55rem .75rem; cursor:pointer">
+          <input type="radio" name="coop_outcome" value="lost" style="width:auto; accent-color:#e08c9e"> Lost
+        </label>
+      </div>
+    </div>
 
     <h2 style="margin-bottom:.25rem">Players</h2>
     <p class="muted" style="font-size:.85rem; margin:0" id="mode-hint">
@@ -45,7 +58,7 @@
       <button type="button" class="ghost" id="add-row" style="margin-top:.75rem">+ Add player</button>
     </div>
 
-    <button type="submit">Save results &amp; update ladder</button>
+    <button type="submit">Save result</button>
   </form>
 </div>
 
@@ -60,7 +73,8 @@
     <input type="text" name="team" placeholder="Team" maxlength="20"
            class="team-field" style="flex:0 0 5.5rem; display:none">
     <input type="number" name="placement" placeholder="#" min="1" max="50"
-           title="Finishing position — 1 is the winner" style="flex:0 0 4rem">
+           class="placement-field" title="Finishing position — 1 is the winner"
+           style="flex:0 0 4rem">
     <button type="button" class="ghost remove-row" title="Remove"
             style="margin:0; flex:0 0 auto">✕</button>
   </div>
@@ -71,22 +85,35 @@
   const tpl = document.getElementById('row-template');
   const gameSel = document.getElementById('game_id');
   const modeHint = document.getElementById('mode-hint');
+  const addBtn = document.getElementById('add-row');
+  const coopBox = document.getElementById('coop-outcome');
 
   function currentMode() {
     const opt = gameSel.selectedOptions[0];
     return opt ? opt.dataset.mode : null;
   }
 
-  const addBtn = document.getElementById('add-row');
+  // Fewest rows a mode allows — you can't delete below it. Co-op can be a solo
+  // game; everything else needs at least two people.
+  function minRows(mode) {
+    return mode === 'coop' ? 1 : 2;
+  }
 
   function applyMode() {
     const mode = currentMode();
     const isTeam = mode === 'team';
     const isDuel = mode === 'duel';
+    const isCoop = mode === 'coop';
 
+    // Team names only for team games; finishing positions for everything except
+    // co-op, where there is no order — just a shared win or loss.
     document.querySelectorAll('.team-field').forEach(f => {
       f.style.display = isTeam ? '' : 'none';
     });
+    document.querySelectorAll('.placement-field').forEach(f => {
+      f.style.display = isCoop ? 'none' : '';
+    });
+    coopBox.style.display = isCoop ? '' : 'none';
 
     // Head to head is strictly two-sided: cap the form at two rows and hide the
     // "add player" button so you can't build an invalid result in the first
@@ -100,6 +127,8 @@
       modeHint.textContent = 'Head to head — exactly two players. 1 = winner, 2 = loser (both 1 for a draw).';
     } else if (isTeam) {
       modeHint.textContent = 'Teams — name each player’s team. Teammates share a finishing position.';
+    } else if (isCoop) {
+      modeHint.textContent = 'Cooperative — everyone who played the game. They all share the result above.';
     } else {
       modeHint.textContent = '1 = winner. Give tied players the same position.';
     }
@@ -113,7 +142,8 @@
   }
 
   rows.addEventListener('click', e => {
-    if (e.target.classList.contains('remove-row') && rows.children.length > 2) {
+    if (e.target.classList.contains('remove-row')
+        && rows.children.length > minRows(currentMode())) {
       e.target.closest('.result-row').remove();
     }
   });
@@ -122,7 +152,7 @@
   });
   gameSel.addEventListener('change', applyMode);
 
-  // Two rows to start — the smallest valid result.
+  // Two rows to start — the smallest valid competitive result.
   addRow(1);
   addRow(2);
 </script>

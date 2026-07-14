@@ -19,6 +19,7 @@ Route map
   GET  /db-check            can the app reach Neon
 """
 
+import hashlib
 import io
 import os
 import random
@@ -53,6 +54,23 @@ ADMIN_COOKIE = "gn_admin"
 # just "my favourite" and tells you nothing about what the group can agree on;
 # two forces a second preference and makes the tally actually mean something.
 MIN_VOTES = 2
+
+# Co-op leaderboards rank by win rate, and a win rate is only meaningful once
+# there is a handful of games behind it — one lucky win should not sit at 100%
+# above everyone. Below this, a player is shown as "still qualifying".
+COOP_MIN_GAMES = 3
+
+# Human-readable game modes, in one place so every template says the same thing.
+MODE_LABELS = {
+    "ffa": "free-for-all",
+    "duel": "head to head",
+    "team": "teams",
+    "coop": "cooperative",
+}
+
+
+def mode_label(mode: str) -> str:
+    return MODE_LABELS.get(mode, mode)
 
 # Uploads are resized to this width before being stored. Nobody needs a 4000px
 # board game box shot on a phone, and it keeps the database small.
@@ -116,6 +134,9 @@ def require_admin(request: Request) -> None:
 
 # Lets every template call is_admin(request) to decide what to draw.
 templates.env.globals["is_admin"] = is_admin
+
+# One spelling of each game mode, shared by every template.
+templates.env.globals["mode_label"] = mode_label
 
 
 # ---------------------------------------------------------------------------
@@ -308,9 +329,10 @@ def home(request: Request):
 
 
 @app.get("/players")
-def players_page(request: Request):
-    """Read-only roster. Players come into existence by signing up for a night,
-    so there is nothing to create here — this page just shows who exists."""
+def players_page(request: Request, deleted: str | None = None):
+    """Read-only roster for everyone; the admin also gets a delete button per
+    player. Players come into existence by signing up for a night, so there is
+    nothing to create here — this page just shows who exists."""
     people = db.fetch_all(
         """
         select p.*, count(s.id) as nights_attended
@@ -323,7 +345,7 @@ def players_page(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="players.html",
-        context={"players": people},
+        context={"players": people, "deleted": deleted},
     )
 
 
@@ -378,16 +400,149 @@ def games_page(request: Request):
     )
 
 
+def _coop_standings(game_id) -> tuple[list[dict], list[dict]]:
+    """Win-rate board for a co-op game.
+
+    Co-op matches have no ratings, so this reads wins and plays straight from the
+    results. A win rate needs a few games behind it to mean anything, so players
+    split into qualifiers (ranked by win rate) and everyone still building up a
+    record. Placement 1 is a win, 2 is a loss — the whole table shares it.
+    """
+    rows = db.fetch_all(
+        """
+        select p.name, p.emoji,
+               count(*) as plays,
+               count(*) filter (where mp.placement = 1) as wins
+        from match_players mp
+        join matches m on m.id = mp.match_id
+        join players p on p.id = mp.player_id
+        where m.game_id = %s
+        group by p.id
+        """,
+        [game_id],
+    )
+    for r in rows:
+        r["win_rate"] = r["wins"] / r["plays"] if r["plays"] else 0.0
+
+    qualifiers = sorted(
+        (r for r in rows if r["plays"] >= COOP_MIN_GAMES),
+        key=lambda r: (-r["win_rate"], -r["wins"], r["name"].lower()),
+    )
+    provisional = sorted(
+        (r for r in rows if r["plays"] < COOP_MIN_GAMES),
+        key=lambda r: (-r["plays"], r["name"].lower()),
+    )
+    return qualifiers, provisional
+
+
+def _title_by_avg_rating(mode: str) -> dict | None:
+    """Holder of a category belt: the highest mean rating across every game of
+    one mode. One game counts — its rating is the mean of one number."""
+    return db.fetch_one(
+        """
+        select p.name, p.emoji, avg(r.rating) as avg_rating, count(*) as games
+        from ratings r
+        join players p on p.id = r.player_id
+        join games g on g.id = r.game_id
+        where g.mode = %s
+        group by p.id
+        order by avg_rating desc, count(*) desc, lower(p.name)
+        limit 1
+        """,
+        [mode],
+    )
+
+
+def compute_titles() -> list[dict]:
+    """Every belt currently held. Three category titles across the competitive
+    modes, plus a "<Game> Master" for each individual game — top rating for a
+    competitive game, best win rate for a co-op one. Only held belts are
+    returned; a game nobody has played yet grants no title."""
+    titles: list[dict] = []
+
+    categories = [
+        ("Duelist", "Best at 1v1", "duel"),
+        ("Brawler", "Best at free-for-all", "ffa"),
+        ("Team Player", "Best at team games", "team"),
+    ]
+    for name, subtitle, mode in categories:
+        holder = _title_by_avg_rating(mode)
+        if holder:
+            titles.append(
+                {
+                    "title": name,
+                    "subtitle": subtitle,
+                    "holder": holder,
+                    "detail": f"{round(holder['avg_rating'])} avg rating",
+                }
+            )
+
+    for g in db.fetch_all(
+        "select id, name, mode from games_summary order by lower(name)"
+    ):
+        if g["mode"] == "coop":
+            holder = db.fetch_one(
+                """
+                select p.name, p.emoji,
+                       count(*) filter (where mp.placement = 1) as wins,
+                       count(*) as plays
+                from match_players mp
+                join matches m on m.id = mp.match_id
+                join players p on p.id = mp.player_id
+                where m.game_id = %s
+                group by p.id
+                having count(*) >= %s
+                order by (count(*) filter (where mp.placement = 1))::float
+                         / count(*) desc, wins desc, lower(p.name)
+                limit 1
+                """,
+                [g["id"], COOP_MIN_GAMES],
+            )
+            detail = (
+                f"{round(100 * holder['wins'] / holder['plays'])}% wins"
+                if holder
+                else None
+            )
+        else:
+            holder = db.fetch_one(
+                """
+                select p.name, p.emoji, r.rating
+                from ratings r
+                join players p on p.id = r.player_id
+                where r.game_id = %s
+                order by r.rating desc, r.games_played desc, lower(p.name)
+                limit 1
+                """,
+                [g["id"]],
+            )
+            detail = f"{round(holder['rating'])} rating" if holder else None
+
+        if holder:
+            titles.append(
+                {
+                    "title": f"{g['name']} Master",
+                    "subtitle": None,
+                    "holder": holder,
+                    "detail": detail,
+                }
+            )
+
+    return titles
+
+
 @app.get("/leaderboard")
 def leaderboard_page(
     request: Request, game: str | None = None, saved: str | None = None
 ):
-    """One ladder per game, chosen from a dropdown.
+    """One board per game, chosen from a dropdown, plus the table of titles.
 
-    The list is every game, not just the active ones: a retired game keeps its
-    leaderboard forever, so it must stay selectable here even though it has
-    dropped off the sign-up page. With nothing chosen we default to the first
-    game so the page is never a bare dropdown.
+    The game list is every game, not just the active ones: a retired game keeps
+    its board forever, so it must stay selectable here even though it has dropped
+    off the sign-up page. With nothing chosen we default to the first game so the
+    page is never a bare dropdown.
+
+    A competitive game shows its Elo ladder; a co-op game shows a win-rate board
+    instead — same page, different maths, decided by the game's mode.
     """
     games = db.fetch_all(
         "select id, name, mode, has_image from games_summary order by lower(name)"
@@ -396,28 +551,35 @@ def leaderboard_page(
 
     selected = None
     standings: list[dict] = []
+    provisional: list[dict] = []
     recent: list[dict] = []
+    is_coop = False
     if selected_id is not None:
         selected = db.fetch_one(
             "select * from games_summary where id = %s", [selected_id]
         )
         if selected is None:
             raise HTTPException(status_code=404, detail="No such game")
+        is_coop = selected["mode"] == "coop"
 
-        standings = db.fetch_all(
-            """
-            select p.name, p.emoji, r.rating, r.games_played
-            from ratings r
-            join players p on p.id = r.player_id
-            where r.game_id = %s
-            order by r.rating desc, r.games_played desc, lower(p.name)
-            """,
-            [selected_id],
-        )
+        if is_coop:
+            standings, provisional = _coop_standings(selected_id)
+        else:
+            standings = db.fetch_all(
+                """
+                select p.name, p.emoji, r.rating, r.games_played
+                from ratings r
+                join players p on p.id = r.player_id
+                where r.game_id = %s
+                order by r.rating desc, r.games_played desc, lower(p.name)
+                """,
+                [selected_id],
+            )
 
         # The last few results, each collapsed into one row via json_agg so the
-        # template gets a match with its players already attached — and the
-        # rating swing (after minus before) for a bit of drama.
+        # template gets a match with its players already attached — with the
+        # rating swing for competitive games (null for co-op, which just won or
+        # lost as a table).
         recent = db.fetch_all(
             """
             select m.played_at,
@@ -448,7 +610,11 @@ def leaderboard_page(
             "games": games,
             "selected": selected,
             "standings": standings,
+            "provisional": provisional,
             "recent": recent,
+            "is_coop": is_coop,
+            "coop_min_games": COOP_MIN_GAMES,
+            "titles": compute_titles(),
             "saved": saved,
         },
     )
@@ -461,23 +627,36 @@ def session_page(request: Request, slug: str, joined: str | None = None):
 
 
 @app.get("/games/{game_id}/image")
-def game_image(game_id: str):
+def game_image(game_id: str, request: Request):
     """Serves a game's picture straight out of Postgres.
 
-    Cached hard by the browser and by Vercel's CDN — the bytes never change for
-    a given game unless you re-upload, and even then a fresh page load is enough
-    to see it. This is what stops every sign-up page view from re-fetching a
-    dozen images from the database.
+    The URL for a game's image never changes, so we can't cache it hard by time:
+    that is exactly what made a re-uploaded picture appear not to save — the
+    browser and CDN kept serving the old bytes from a still-valid cache for up to
+    an hour. Instead the cache is keyed on the *content*: an ETag that is a hash
+    of the image bytes. Browsers revalidate on every view, but when nothing has
+    changed that costs a tiny 304 with no body, and the instant you upload a new
+    picture the hash changes and the new image is served at once.
     """
     row = db.fetch_one(
         "select image, image_type from games where id = %s", [game_id]
     )
     if not row or row["image"] is None:
         raise HTTPException(status_code=404, detail="No picture for that game")
+
+    data = bytes(row["image"])
+    etag = '"' + hashlib.md5(data).hexdigest() + '"'
+    cache_headers = {"ETag": etag, "Cache-Control": "public, max-age=0, must-revalidate"}
+
+    # The browser sends back the ETag it holds; if it still matches, it already
+    # has the right image and we send nothing but "you're up to date".
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=cache_headers)
+
     return Response(
-        content=bytes(row["image"]),
+        content=data,
         media_type=row["image_type"] or "image/jpeg",
-        headers={"Cache-Control": "public, max-age=3600"},
+        headers=cache_headers,
     )
 
 
@@ -624,7 +803,7 @@ def admin_logout():
 
 
 @app.get("/admin", dependencies=[Depends(require_admin)])
-def admin_page(request: Request):
+def admin_page(request: Request, deleted: str | None = None):
     sessions = db.fetch_all(
         """
         select s.*, count(su.id) as signup_count
@@ -637,7 +816,7 @@ def admin_page(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="admin.html",
-        context={"sessions": sessions, "games": active_games()},
+        context={"sessions": sessions, "games": active_games(), "deleted": deleted},
     )
 
 
@@ -666,6 +845,52 @@ def set_session_status(session_id: str, status: str = Form(...)):
         raise HTTPException(status_code=400, detail="Unknown status")
     db.execute("update sessions set status = %s where id = %s", [status, session_id])
     return redirect("/admin")
+
+
+@app.post("/admin/sessions/{session_id}/delete", dependencies=[Depends(require_admin)])
+def delete_session(session_id: str):
+    """Delete a game night — and, as asked, the results played that night with it.
+
+    A match normally outlives its night (matches.session_id is ON DELETE SET
+    NULL, so a deleted night would otherwise just orphan its matches and keep
+    the ratings). Here we deliberately delete those matches first, then rebuild
+    every ladder they touched so the leaderboards forget the night entirely, as
+    if it never happened. Sign-ups and votes for the night cascade away on their
+    own.
+    """
+    # Which ladders will need rebuilding once this night's matches are gone.
+    affected = db.fetch_all(
+        "select distinct game_id from matches where session_id = %s", [session_id]
+    )
+    # match_players cascades from matches; ratings are rebuilt below from scratch.
+    db.execute("delete from matches where session_id = %s", [session_id])
+    db.execute("delete from sessions where id = %s", [session_id])
+    for row in affected:
+        elo.recompute_game(row["game_id"])
+    return redirect("/admin?deleted=night")
+
+
+@app.post("/admin/players/{player_id}/delete", dependencies=[Depends(require_admin)])
+def delete_player(player_id: str):
+    """Remove a player completely — test accounts, duplicates, whoever.
+
+    A player's match results have no cascade (that is on purpose: you can't
+    casually delete someone who is woven into other people's history), so we
+    clear those by hand, remember which games they touched, then delete the
+    player. Their sign-ups, votes and ratings cascade. Finally every affected
+    ladder is replayed, because a match that used to have this person in it is
+    now a smaller match and everyone else's rating for it shifts accordingly.
+    """
+    affected = db.fetch_all(
+        "select distinct m.game_id from match_players mp "
+        "join matches m on m.id = mp.match_id where mp.player_id = %s",
+        [player_id],
+    )
+    db.execute("delete from match_players where player_id = %s", [player_id])
+    db.execute("delete from players where id = %s", [player_id])
+    for row in affected:
+        elo.recompute_game(row["game_id"])
+    return redirect("/players?deleted=1")
 
 
 @app.post("/admin/games", dependencies=[Depends(require_admin)])
@@ -817,11 +1042,13 @@ def results_form(request: Request):
 
 @app.post("/admin/results", dependencies=[Depends(require_admin)])
 async def record_results(request: Request):
-    """Record one game's result and rebuild that game's ladder.
+    """Record one game's result and rebuild that game's board.
 
-    Read from the raw form because the player rows arrive as parallel repeated
-    fields (player_name=..&placement=..&team=..). Rows with a blank name are
-    dropped, so the admin can leave spare rows lying around in the form.
+    A competitive game replays its Elo ladder; a co-op game just banks the shared
+    win or loss (handled early, below). Read from the raw form because the player
+    rows arrive as parallel repeated fields (player_name=..&placement=..&team=..).
+    Rows with a blank name are dropped, so the admin can leave spare rows lying
+    around in the form.
 
     Players are found-or-created by typed name, exactly like sign-up: someone can
     appear in a result without ever having formally signed up for the night.
@@ -833,6 +1060,38 @@ async def record_results(request: Request):
     game = db.fetch_one("select id, name, mode from games where id = %s", [game_id])
     if game is None:
         raise HTTPException(status_code=400, detail="Pick a game")
+
+    # Co-op is its own thing: the whole table wins or loses together, there are
+    # no positions and no Elo. Record everyone with the shared outcome (placement
+    # 1 = won, 2 = lost) and stop — the win-rate board reads straight from these.
+    if game["mode"] == "coop":
+        outcome = form.get("coop_outcome")
+        if outcome not in {"won", "lost"}:
+            raise HTTPException(
+                status_code=400, detail="Say whether the table won or lost"
+            )
+        placement = 1 if outcome == "won" else 2
+        names = [n.strip() for n in form.getlist("player_name") if n.strip()]
+        if not names:
+            raise HTTPException(status_code=400, detail="Add at least one player")
+
+        match = db.fetch_one(
+            "insert into matches (game_id, session_id) values (%s, %s) returning id",
+            [game["id"], session_id],
+        )
+        for name in names:
+            player = find_or_create_player(name)
+            db.execute(
+                """
+                insert into match_players (match_id, player_id, placement)
+                values (%s, %s, %s)
+                on conflict (match_id, player_id)
+                do update set placement = excluded.placement
+                """,
+                [match["id"], player["id"], placement],
+            )
+        # No recompute: co-op games never enter the ratings table.
+        return redirect(f"/leaderboard?game={game['id']}&saved={game['name']}")
 
     names = form.getlist("player_name")
     placements = form.getlist("placement")
