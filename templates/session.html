@@ -32,7 +32,7 @@
 <form method="post" action="/s/{{ session.slug }}/signup" id="signup-form">
 
   <div class="card">
-    <label for="name">Your name</label>
+    <label for="name">Your name - Make sure to type the same name to keep track of your progress!</label>
     <input type="text" id="name" name="name" list="known-players" maxlength="40"
            required autocomplete="off" placeholder="Type your name"
            value="{{ form_name }}">
