@@ -32,4 +32,23 @@
   </div>
 {% endif %}
 
+{% if previous %}
+  <h2>Previous nights</h2>
+  {% for s in previous %}
+    <div class="card">
+      <a href="/s/{{ s.slug }}">
+        <strong>{{ s.title }}</strong><br>
+        <span class="muted">
+          {{ s.scheduled_for.strftime('%a %-d %b, %H:%M') }}
+          {% if s.location %} · {{ s.location }}{% endif %}
+        </span>
+      </a>
+      <div style="margin-top:.5rem">
+        <span class="pill">{{ s.signup_count }} there</span>
+        <span class="pill">{{ s.match_count }} game{{ '' if s.match_count == 1 else 's' }} recorded</span>
+      </div>
+    </div>
+  {% endfor %}
+{% endif %}
+
 {% endblock %}

@@ -24,6 +24,10 @@
   <div class="flash">You're in, {{ joined }}. Change your mind any time — just submit again.</div>
 {% endif %}
 
+{% if saved %}
+  <div class="flash">Saved — {{ saved }}.</div>
+{% endif %}
+
 {% if error %}
   <div class="flash warn">{{ error }}</div>
 {% endif %}
@@ -106,7 +110,7 @@
 </script>
 {% endif %}
 
-<h2>Coming ({{ signups|length }})</h2>
+<h2>{% if session.status == 'open' %}Coming{% else %}Who was there{% endif %} ({{ signups|length }})</h2>
 
 {% if signups %}
   {% for s in signups %}
@@ -121,11 +125,106 @@
         <input type="hidden" name="player_id" value="{{ s.player_id }}">
         <button type="submit" class="ghost">Can't make it</button>
       </form>
+      {% elif is_admin(request) %}
+      <form method="post" action="/admin/sessions/{{ session.id }}/attendee/remove" style="margin-top:.5rem"
+            onsubmit="return confirm('Remove {{ s.name }} from this night?');">
+        <input type="hidden" name="player_id" value="{{ s.player_id }}">
+        <button type="submit" class="ghost" style="color:#e08c9e; border-color:#5a3440">Remove</button>
+      </form>
       {% endif %}
     </div>
   {% endfor %}
 {% else %}
-  <div class="card"><p class="muted" style="margin:0">Nobody yet. Be the first.</p></div>
+  <div class="card"><p class="muted" style="margin:0">
+    {% if session.status == 'open' %}Nobody yet. Be the first.{% else %}Nobody was recorded for this night.{% endif %}
+  </p></div>
+{% endif %}
+
+{% if is_admin(request) %}
+  <div class="card">
+    <form method="post" action="/admin/sessions/{{ session.id }}/attendee">
+      <label for="attendee-name" style="margin-top:0">➕ Add someone who was there</label>
+      <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap">
+        <input type="text" id="attendee-name" name="name" list="known-players-att"
+               required maxlength="40" autocomplete="off" placeholder="Type a name"
+               style="flex:1 1 12rem">
+        <datalist id="known-players-att">
+          {% for p in players %}<option value="{{ p.name }}">{% endfor %}
+        </datalist>
+        <button type="submit" class="ghost" style="margin:0">Add</button>
+      </div>
+    </form>
+  </div>
+{% endif %}
+
+<h2>Game outcomes ({{ matches|length }})</h2>
+
+{% if matches %}
+  {% for m in matches %}
+    <div class="card">
+      <div style="display:flex; align-items:baseline; gap:.5rem; flex-wrap:wrap">
+        <strong>{{ m.game_name }}</strong>
+        <span class="pill" style="font-weight:400">{{ mode_label(m.game_mode) }}</span>
+        <span class="muted" style="font-size:.75rem; margin-left:auto">{{ m.played_at.strftime('%-d %b, %H:%M') }}</span>
+      </div>
+
+      {% if m.game_mode == 'coop' %}
+        {% set won = m.players[0].placement == 1 %}
+        <div style="margin-top:.4rem">
+          <span class="pill" style="{% if won %}background:#1e3a2c; color:#b9f0d3{% else %}background:#3a1e26; color:#f0b9c6{% endif %}">
+            {{ 'Won 🎉' if won else 'Lost' }}
+          </span>
+          {% for pl in m.players %}<span class="pill">{{ pl.emoji }} {{ pl.name }}</span>{% endfor %}
+        </div>
+      {% else %}
+        <table style="margin-top:.3rem">
+          {% for pl in m.players %}
+            <tr>
+              <td class="muted" style="width:2rem">{{ pl.placement }}</td>
+              <td>
+                {{ pl.emoji }} {{ pl.name }}
+                {% if pl.team %}<span class="pill">{{ pl.team }}</span>{% endif %}
+              </td>
+              <td style="text-align:right; font-variant-numeric:tabular-nums;
+                         color: {% if pl.delta is not none and pl.delta >= 0 %}var(--good){% elif pl.delta is not none %}#e08c9e{% else %}var(--muted){% endif %}">
+                {% if pl.delta is not none %}{{ '+' if pl.delta >= 0 else '' }}{{ pl.delta|round|int }}{% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </table>
+      {% endif %}
+
+      {% if is_admin(request) %}
+        <div style="display:flex; gap:.5rem; margin-top:.5rem">
+          <a href="/admin/results?match={{ m.id }}"><button type="button" class="ghost" style="margin:0">Edit</button></a>
+          <form method="post" action="/admin/matches/{{ m.id }}/delete" style="margin:0"
+                onsubmit="return confirm('Delete this {{ m.game_name }} result? The leaderboard will be recalculated.');">
+            <button type="submit" class="ghost" style="color:#e08c9e; border-color:#5a3440; margin:0">Delete</button>
+          </form>
+        </div>
+      {% endif %}
+    </div>
+  {% endfor %}
+{% else %}
+  <div class="card"><p class="muted" style="margin:0">No games recorded for this night{% if is_admin(request) %} yet{% endif %}.</p></div>
+{% endif %}
+
+{% if is_admin(request) %}
+  <a href="/admin/results?session={{ session.id }}"><button type="button">Add a game result</button></a>
+{% endif %}
+
+{% if awards %}
+  <h2>Awards</h2>
+  <div class="card">
+    <table>
+      {% for a in awards %}
+        <tr>
+          <td>🏅 {{ a.award }}</td>
+          <td style="text-align:right">{{ a.emoji }} {{ a.name }}</td>
+        </tr>
+      {% endfor %}
+    </table>
+  </div>
 {% endif %}
 
 {% if tally %}

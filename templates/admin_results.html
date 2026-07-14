@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block title %}Enter results{% endblock %}
+{% block title %}{{ 'Edit result' if prefill else 'Enter results' }}{% endblock %}
 {% block content %}
 
-<h1>Enter results</h1>
+<h1>{{ 'Edit result' if prefill else 'Enter results' }}</h1>
 <p class="muted">
   Record who played and how it went. The maths follows the game's mode: a duel, a
   free-for-all and a team game each score their own way, and a cooperative game
@@ -12,21 +12,32 @@
 <div class="card">
   <form method="post" action="/admin/results" id="results-form">
 
-    <label for="game_id">Game</label>
-    <select id="game_id" name="game_id" required>
-      <option value="" disabled selected>Choose a game…</option>
-      {% for g in games %}
-        <option value="{{ g.id }}" data-mode="{{ g.mode }}">
-          {{ g.name }} — {{ mode_label(g.mode) }}
-        </option>
-      {% endfor %}
-    </select>
+    {% if prefill %}
+      {# Editing an existing result: the game is fixed, everything else is open. #}
+      <input type="hidden" name="match_id" value="{{ prefill.match_id }}">
+      <input type="hidden" name="game_id" value="{{ prefill.game_id }}">
+      <label>Game</label>
+      <div class="card" style="margin:0; padding:.6rem .85rem">
+        {{ prefill.game_name }} — {{ mode_label(prefill.mode) }}
+        <span class="muted" style="font-size:.75rem"> · locked while editing</span>
+      </div>
+    {% else %}
+      <label for="game_id">Game</label>
+      <select id="game_id" name="game_id" required>
+        <option value="" disabled selected>Choose a game…</option>
+        {% for g in games %}
+          <option value="{{ g.id }}" data-mode="{{ g.mode }}">
+            {{ g.name }} — {{ mode_label(g.mode) }}
+          </option>
+        {% endfor %}
+      </select>
+    {% endif %}
 
     <label for="session_id">Which night? <span class="muted">(optional)</span></label>
     <select id="session_id" name="session_id">
       <option value="">— not linked to a night —</option>
       {% for s in sessions %}
-        <option value="{{ s.id }}">{{ s.title }} · {{ s.scheduled_for.strftime('%-d %b') }}</option>
+        <option value="{{ s.id }}" {% if s.id|string == preselect_session %}selected{% endif %}>{{ s.title }} · {{ s.scheduled_for.strftime('%-d %b') }}</option>
       {% endfor %}
     </select>
 
@@ -58,11 +69,11 @@
       <button type="button" class="ghost" id="add-row" style="margin-top:.75rem">+ Add player</button>
     </div>
 
-    <button type="submit">Save result</button>
+    <button type="submit">{{ 'Save changes' if prefill else 'Save result' }}</button>
   </form>
 </div>
 
-{% if not games %}
+{% if not prefill and not games %}
   <p class="muted">No active games to record against. Add one on the games page first.</p>
 {% endif %}
 
@@ -81,14 +92,17 @@
 </template>
 
 <script>
+  const PREFILL = {{ prefill|tojson }};
+
   const rows = document.getElementById('rows');
   const tpl = document.getElementById('row-template');
-  const gameSel = document.getElementById('game_id');
+  const gameSel = document.getElementById('game_id');   // null while editing
   const modeHint = document.getElementById('mode-hint');
   const addBtn = document.getElementById('add-row');
   const coopBox = document.getElementById('coop-outcome');
 
   function currentMode() {
+    if (PREFILL) return PREFILL.mode;              // game is locked when editing
     const opt = gameSel.selectedOptions[0];
     return opt ? opt.dataset.mode : null;
   }
@@ -134,9 +148,11 @@
     }
   }
 
-  function addRow(place) {
+  function addRow(place, name, team) {
     const node = tpl.content.firstElementChild.cloneNode(true);
     if (place) node.querySelector('input[name=placement]').value = place;
+    if (name) node.querySelector('input[name=player_name]').value = name;
+    if (team) node.querySelector('input[name=team]').value = team;
     rows.appendChild(node);
     applyMode();
   }
@@ -150,11 +166,26 @@
   addBtn.addEventListener('click', () => {
     if (currentMode() !== 'duel') addRow();
   });
-  gameSel.addEventListener('change', applyMode);
+  if (gameSel) gameSel.addEventListener('change', applyMode);
 
-  // Two rows to start — the smallest valid competitive result.
-  addRow(1);
-  addRow(2);
+  if (PREFILL) {
+    // Rebuild the saved line-up so editing starts from what actually happened.
+    if (PREFILL.rows.length) {
+      PREFILL.rows.forEach(r => addRow(r.placement, r.name, r.team));
+    } else {
+      addRow(1); addRow(2);
+    }
+    if (PREFILL.mode === 'coop') {
+      const val = PREFILL.coop_won ? 'won' : 'lost';
+      const radio = document.querySelector('input[name=coop_outcome][value=' + val + ']');
+      if (radio) radio.checked = true;
+    }
+    applyMode();
+  } else {
+    // Two rows to start — the smallest valid competitive result.
+    addRow(1);
+    addRow(2);
+  }
 </script>
 
 {% endblock %}

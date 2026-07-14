@@ -182,6 +182,50 @@ def get_signups(session_id) -> list[dict]:
     )
 
 
+def get_session_matches(session_id) -> list[dict]:
+    """Every game outcome recorded against one night, each collapsed into a row
+    with its game and its players (ordered by finishing position). This is what
+    turns a session page into the full record of the night. Co-op matches carry
+    no rating swing, so delta is null there — the template shows won/lost from
+    the shared placement instead."""
+    return db.fetch_all(
+        """
+        select m.id, m.played_at, g.name as game_name, g.mode as game_mode,
+               json_agg(
+                   json_build_object(
+                       'name', p.name,
+                       'emoji', p.emoji,
+                       'placement', mp.placement,
+                       'team', mp.team,
+                       'delta', mp.rating_after - mp.rating_before
+                   ) order by mp.placement
+               ) as players
+        from matches m
+        join games g on g.id = m.game_id
+        join match_players mp on mp.match_id = m.id
+        join players p on p.id = mp.player_id
+        where m.session_id = %s
+        group by m.id, g.name, g.mode
+        order by m.played_at, m.created_at
+        """,
+        [session_id],
+    )
+
+
+def get_session_awards(session_id) -> list[dict]:
+    """Celebratory awards handed out on one night, for the recap."""
+    return db.fetch_all(
+        """
+        select a.award, p.name, p.emoji
+        from session_awards a
+        join players p on p.id = a.player_id
+        where a.session_id = %s
+        order by lower(a.award)
+        """,
+        [session_id],
+    )
+
+
 def get_vote_tally(session_id) -> list[dict]:
     """Which games are winning the vote for this night."""
     return db.fetch_all(
@@ -320,11 +364,32 @@ def home(request: Request):
         order by s.scheduled_for
         """
     )
+    # Everything that isn't an open, still-upcoming night: the archive. Each one
+    # links through to its full record — who came, and every game outcome. The
+    # match count is a distinct-count because the left join fans rows out per
+    # sign-up, and we do not want signups multiplying the tally.
+    previous = db.fetch_all(
+        """
+        select s.*, count(distinct su.id) as signup_count,
+               count(distinct m.id) as match_count
+        from sessions s
+        left join signups su on su.session_id = s.id
+        left join matches m on m.session_id = s.id
+        where s.status <> 'open'
+           or s.scheduled_for <= now() - interval '12 hours'
+        group by s.id
+        order by s.scheduled_for desc
+        """
+    )
     player_count = db.fetch_one("select count(*) as n from players")["n"]
     return templates.TemplateResponse(
         request=request,
         name="index.html",
-        context={"upcoming": upcoming, "player_count": player_count},
+        context={
+            "upcoming": upcoming,
+            "previous": previous,
+            "player_count": player_count,
+        },
     )
 
 
@@ -354,13 +419,18 @@ def render_session(
     session: dict,
     joined: str | None = None,
     error: str | None = None,
+    saved: str | None = None,
     form_name: str = "",
     form_note: str = "",
     form_games: list[str] | None = None,
 ):
     """One place that builds the session page, so a failed sign-up can re-render
     it with the error and the person's answers still filled in — rather than
-    dumping them on a blank error page and making them start again."""
+    dumping them on a blank error page and making them start again.
+
+    The page doubles as the full record of the night: alongside sign-ups and the
+    vote it shows every game outcome and award, and — for the admin — the
+    controls to edit them."""
     return templates.TemplateResponse(
         request=request,
         name="session.html",
@@ -368,10 +438,13 @@ def render_session(
             "session": session,
             "signups": get_signups(session["id"]),
             "tally": get_vote_tally(session["id"]),
+            "matches": get_session_matches(session["id"]),
+            "awards": get_session_awards(session["id"]),
             "games": active_games(),
             "players": db.fetch_all("select name from players order by lower(name)"),
             "joined": joined,
             "error": error,
+            "saved": saved,
             "min_votes": MIN_VOTES,
             "form_name": form_name,
             "form_note": form_note,
@@ -660,9 +733,17 @@ def leaderboard_page(
 
 
 @app.get("/s/{slug}")
-def session_page(request: Request, slug: str, joined: str | None = None):
-    """This is the URL you paste into WhatsApp."""
-    return render_session(request, get_session_by_slug(slug), joined=joined)
+def session_page(
+    request: Request,
+    slug: str,
+    joined: str | None = None,
+    saved: str | None = None,
+):
+    """This is the URL you paste into WhatsApp — and the full record of the night
+    once it has been played."""
+    return render_session(
+        request, get_session_by_slug(slug), joined=joined, saved=saved
+    )
 
 
 @app.get("/games/{game_id}/image")
@@ -966,6 +1047,63 @@ def set_session_award(
     return redirect("/admin")
 
 
+@app.post("/admin/sessions/{session_id}/attendee", dependencies=[Depends(require_admin)])
+def add_attendee(session_id: str, name: str = Form(...)):
+    """Add someone to a night's roster after the fact — for editing who was
+    there. Unlike public sign-up this asks for no game votes and ignores the seat
+    cap: the admin is recording history, not competing for a seat."""
+    session = db.fetch_one("select slug from sessions where id = %s", [session_id])
+    if session is None:
+        raise HTTPException(status_code=404, detail="No such game night")
+    player = find_or_create_player(name)
+    db.execute(
+        "insert into signups (session_id, player_id) values (%s, %s) "
+        "on conflict (session_id, player_id) do nothing",
+        [session_id, player["id"]],
+    )
+    return redirect(f"/s/{session['slug']}")
+
+
+@app.post(
+    "/admin/sessions/{session_id}/attendee/remove",
+    dependencies=[Depends(require_admin)],
+)
+def remove_attendee(session_id: str, player_id: str = Form(...)):
+    """Take someone off a night's roster. Their game results, if any, are left
+    alone — removing an attendee is about the sign-up list, not rewriting who
+    played. Delete or edit the match itself to change that."""
+    session = db.fetch_one("select slug from sessions where id = %s", [session_id])
+    if session is None:
+        raise HTTPException(status_code=404, detail="No such game night")
+    db.execute(
+        "delete from signups where session_id = %s and player_id = %s",
+        [session_id, player_id],
+    )
+    return redirect(f"/s/{session['slug']}")
+
+
+@app.post("/admin/matches/{match_id}/delete", dependencies=[Depends(require_admin)])
+def delete_match(match_id: str):
+    """Delete a single game outcome and rebuild that game's ladder. Redirects
+    back to the night it belonged to when there is one, else to the leaderboard."""
+    match = db.fetch_one(
+        """
+        select m.game_id, s.slug
+        from matches m
+        left join sessions s on s.id = m.session_id
+        where m.id = %s
+        """,
+        [match_id],
+    )
+    if match is None:
+        raise HTTPException(status_code=404, detail="No such result")
+    db.execute("delete from matches where id = %s", [match_id])  # players cascade
+    elo.recompute_game(match["game_id"])  # a no-op for co-op games
+    if match["slug"]:
+        return redirect(f"/s/{match['slug']}?saved=result deleted")
+    return redirect(f"/leaderboard?game={match['game_id']}")
+
+
 @app.post("/admin/sessions/{session_id}/delete", dependencies=[Depends(require_admin)])
 def delete_session(session_id: str):
     """Delete a game night — and, as asked, the results played that night with it.
@@ -1141,10 +1279,55 @@ def update_game(
 
 
 @app.get("/admin/results", dependencies=[Depends(require_admin)])
-def results_form(request: Request):
-    """Enter what happened at the table: who played a game and where they
-    finished. Active games only — you record results against games you still
-    offer; a retired game's history is read-only from here on."""
+def results_form(
+    request: Request,
+    session: str | None = None,
+    match: str | None = None,
+):
+    """Enter — or edit — what happened at the table.
+
+    With no parameters this is a blank entry form (new games only). `?session=`
+    pre-selects a night. `?match=` loads an existing result for editing: the game
+    is locked (changing it would move the result to another ladder) and the rows
+    come pre-filled, so saving updates that match in place rather than adding a
+    new one.
+    """
+    prefill = None
+    if match:
+        m = db.fetch_one(
+            """
+            select m.id, m.game_id, m.session_id, g.name as game_name, g.mode
+            from matches m
+            join games g on g.id = m.game_id
+            where m.id = %s
+            """,
+            [match],
+        )
+        if m is None:
+            raise HTTPException(status_code=404, detail="No such result")
+        parts = db.fetch_all(
+            """
+            select p.name, mp.placement, mp.team
+            from match_players mp
+            join players p on p.id = mp.player_id
+            where mp.match_id = %s
+            order by mp.placement, lower(p.name)
+            """,
+            [match],
+        )
+        prefill = {
+            "match_id": str(m["id"]),
+            "game_id": str(m["game_id"]),
+            "game_name": m["game_name"],
+            "mode": m["mode"],
+            "session_id": str(m["session_id"]) if m["session_id"] else "",
+            "coop_won": bool(parts) and m["mode"] == "coop" and parts[0]["placement"] == 1,
+            "rows": [
+                {"name": p["name"], "placement": p["placement"], "team": p["team"] or ""}
+                for p in parts
+            ],
+        }
+
     return templates.TemplateResponse(
         request=request,
         name="admin_results.html",
@@ -1155,13 +1338,47 @@ def results_form(request: Request):
                 "select id, title, scheduled_for from sessions "
                 "order by scheduled_for desc limit 20"
             ),
+            "prefill": prefill,
+            "preselect_session": session or (prefill["session_id"] if prefill else ""),
         },
     )
 
 
+def _upsert_match(match_id, game_id, session_id):
+    """Return the id of the match to attach results to.
+
+    In edit mode (match_id given) reuse that match, point it at the chosen night,
+    and clear its old line-up so the incoming rows fully replace it — otherwise a
+    player dropped from the result would linger. Otherwise create a new match.
+    """
+    if match_id:
+        db.execute(
+            "update matches set session_id = %s where id = %s",
+            [session_id, match_id],
+        )
+        db.execute("delete from match_players where match_id = %s", [match_id])
+        return match_id
+    row = db.fetch_one(
+        "insert into matches (game_id, session_id) values (%s, %s) returning id",
+        [game_id, session_id],
+    )
+    return row["id"]
+
+
+def _results_redirect(game: dict, session_id):
+    """After saving a result, go back to the night it belongs to (so editing a
+    night's outcomes returns you there), or to the game's leaderboard when the
+    result was entered standalone."""
+    if session_id:
+        s = db.fetch_one("select slug from sessions where id = %s", [session_id])
+        if s:
+            return redirect(f"/s/{s['slug']}?saved={game['name']} result saved")
+    return redirect(f"/leaderboard?game={game['id']}&saved={game['name']}")
+
+
 @app.post("/admin/results", dependencies=[Depends(require_admin)])
 async def record_results(request: Request):
-    """Record one game's result and rebuild that game's board.
+    """Record or edit one game's result and rebuild that game's board.
 
     A competitive game replays its Elo ladder; a co-op game just banks the shared
     win or loss (handled early, below). Read from the raw form because the player
@@ -1173,10 +1390,25 @@ async def record_results(request: Request):
     appear in a result without ever having formally signed up for the night.
     """
     form = await request.form()
-    game_id = form.get("game_id")
     session_id = (form.get("session_id") or "").strip() or None
 
-    game = db.fetch_one("select id, name, mode from games where id = %s", [game_id])
+    # In edit mode a match_id arrives and the game is taken from that match, not
+    # the form — the game is locked while editing, and trusting the match keeps a
+    # tampered form from moving a result onto the wrong ladder.
+    match_id = (form.get("match_id") or "").strip() or None
+    if match_id:
+        existing = db.fetch_one(
+            "select game_id from matches where id = %s", [match_id]
+        )
+        if existing is None:
+            raise HTTPException(status_code=404, detail="No such result")
+        game = db.fetch_one(
+            "select id, name, mode from games where id = %s", [existing["game_id"]]
+        )
+    else:
+        game = db.fetch_one(
+            "select id, name, mode from games where id = %s", [form.get("game_id")]
+        )
     if game is None:
         raise HTTPException(status_code=400, detail="Pick a game")
 
@@ -1194,10 +1426,7 @@ async def record_results(request: Request):
         if not names:
             raise HTTPException(status_code=400, detail="Add at least one player")
 
-        match = db.fetch_one(
-            "insert into matches (game_id, session_id) values (%s, %s) returning id",
-            [game["id"], session_id],
-        )
+        mid = _upsert_match(match_id, game["id"], session_id)
         for name in names:
             player = find_or_create_player(name)
             db.execute(
@@ -1207,10 +1436,10 @@ async def record_results(request: Request):
                 on conflict (match_id, player_id)
                 do update set placement = excluded.placement
                 """,
-                [match["id"], player["id"], placement],
+                [mid, player["id"], placement],
             )
         # No recompute: co-op games never enter the ratings table.
-        return redirect(f"/leaderboard?game={game['id']}&saved={game['name']}")
+        return _results_redirect(game, session_id)
 
     names = form.getlist("player_name")
     placements = form.getlist("placement")
@@ -1253,10 +1482,7 @@ async def record_results(request: Request):
                 status_code=400, detail="A team game needs at least two teams"
             )
 
-    match = db.fetch_one(
-        "insert into matches (game_id, session_id) values (%s, %s) returning id",
-        [game["id"], session_id],
-    )
+    mid = _upsert_match(match_id, game["id"], session_id)
     for name, placement, team in rows:
         player = find_or_create_player(name)
         db.execute(
@@ -1266,14 +1492,14 @@ async def record_results(request: Request):
             on conflict (match_id, player_id)
             do update set placement = excluded.placement, team = excluded.team
             """,
-            [match["id"], player["id"], placement, team],
+            [mid, player["id"], placement, team],
         )
 
-    # Replay the whole game so the new match and every rating it touches land
-    # together and consistently.
+    # Replay the whole game so the match and every rating it touches land together
+    # and consistently.
     elo.recompute_game(game["id"])
 
-    return redirect(f"/leaderboard?game={game['id']}&saved={game['name']}")
+    return _results_redirect(game, session_id)
 
 
 # ---------------------------------------------------------------------------
