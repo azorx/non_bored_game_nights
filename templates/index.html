@@ -15,7 +15,7 @@
         </span>
       </a>
       <div style="margin-top:.5rem">
-        <span class="pill">{{ s.signup_count }} signed up</span>
+        <span class="pill">{{ s.signup_count }}/{{ s.seats }} seats{% if s.signup_count >= s.seats %} · full{% endif %}</span>
         <span class="pill">/s/{{ s.slug }}</span>
       </div>
     </div>

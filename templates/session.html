@@ -8,10 +8,15 @@
 <p class="muted">
   {{ session.scheduled_for.strftime('%A %-d %B, %H:%M') }}
   {% if session.location %} · {{ session.location }}{% endif %}
+  · {{ signups|length }}/{{ session.seats }} seats
 </p>
+
+{% set full = signups|length >= session.seats %}
 
 {% if session.status != 'open' %}
   <div class="flash warn">Sign-ups are closed for this one.</div>
+{% elif full %}
+  <div class="flash warn">All {{ session.seats }} seats are taken. Already on the list? You can still edit your entry below.</div>
 {% endif %}
 
 {% if joined %}

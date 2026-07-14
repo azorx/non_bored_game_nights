@@ -434,6 +434,34 @@ async def signup(request: Request, slug: str):
             form_games=game_ids,
         )
 
+    # Seats are first-come-first-served, but a returning player editing their
+    # own sign-up must never be locked out by a full session — only a brand
+    # new sign-up competes for the seats that are left. Looked up by name
+    # rather than via find_or_create_player, so a rejected sign-up never
+    # creates a player row for someone who didn't get a seat.
+    existing_player = db.fetch_one(
+        "select * from players where lower(name) = lower(%s)",
+        [" ".join(name.split())],
+    )
+    already_in = existing_player and db.fetch_one(
+        "select 1 from signups where session_id = %s and player_id = %s",
+        [session["id"], existing_player["id"]],
+    )
+    if not already_in:
+        taken = db.fetch_one(
+            "select count(*) as n from signups where session_id = %s",
+            [session["id"]],
+        )["n"]
+        if taken >= session["seats"]:
+            return render_session(
+                request,
+                session,
+                error="Sorry — all seats are taken for this night.",
+                form_name=name,
+                form_note=note or "",
+                form_games=game_ids,
+            )
+
     player = find_or_create_player(name)
 
     # Upsert: signing up twice edits your entry rather than duplicating it.
@@ -541,13 +569,16 @@ def create_session(
     title: str = Form(...),
     scheduled_for: str = Form(...),  # from <input type="datetime-local">
     location: str = Form(""),
+    seats: int = Form(6),
 ):
+    if not 1 <= seats <= 100:
+        raise HTTPException(status_code=400, detail="Seats must be between 1 and 100")
     when = datetime.fromisoformat(scheduled_for)
     slug = make_slug()
     db.execute(
-        "insert into sessions (slug, title, scheduled_for, location) "
-        "values (%s, %s, %s, %s)",
-        [slug, title.strip(), when, location.strip() or None],
+        "insert into sessions (slug, title, scheduled_for, location, seats) "
+        "values (%s, %s, %s, %s, %s)",
+        [slug, title.strip(), when, location.strip() or None, seats],
     )
     return redirect(f"/s/{slug}")
 
