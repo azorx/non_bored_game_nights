@@ -23,7 +23,11 @@
 {% else %}
   <div class="card">
     <p class="muted" style="margin:0">
-      Nothing scheduled. Head to <a href="/admin" style="color:var(--accent)">admin</a> to create a game night.
+      {% if is_admin(request) %}
+        Nothing scheduled. <a href="/admin" style="color:var(--accent)">Create a game night</a>.
+      {% else %}
+        Nothing scheduled yet. Check back soon.
+      {% endif %}
     </p>
   </div>
 {% endif %}

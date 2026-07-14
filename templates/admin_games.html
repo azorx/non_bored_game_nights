@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>Games</h1>
+<p class="muted">Pictures, descriptions and durations all show up on the sign-up page.</p>
+
+{% if deleted %}
+  <div class="flash">Game deleted. It had never been played, so nothing was lost.</div>
+{% endif %}
+{% if retired %}
+  <div class="flash warn">
+    {{ retired }} has been played, so it was retired rather than deleted — it is
+    off the sign-up page but its leaderboard and match history are intact.
+  </div>
+{% endif %}
+
+<h2>Add a game</h2>
+<div class="card">
+  <form method="post" action="/admin/games" enctype="multipart/form-data">
+    <label for="gname">Name</label>
+    <input type="text" id="gname" name="name" required maxlength="60">
+
+    <label for="gdesc">Description</label>
+    <textarea id="gdesc" name="description" maxlength="300"
+              placeholder="Trade sheep, build roads, betray your friends."></textarea>
+
+    <label for="gpic">Picture</label>
+    <input type="file" id="gpic" name="picture" accept="image/*">
+
+    <label for="gdur">Typical duration (minutes)</label>
+    <input type="number" id="gdur" name="duration_minutes" min="1" max="600"
+           placeholder="Leave blank if you're not sure">
+
+    <label for="gmode">Mode</label>
+    <select id="gmode" name="mode">
+      <option value="ffa">Free-for-all</option>
+      <option value="duel">Head to head</option>
+      <option value="team">Teams</option>
+    </select>
+
+    <label for="gmin">Min players</label>
+    <input type="number" id="gmin" name="min_players" value="2" min="2" max="20">
+    <label for="gmax">Max players</label>
+    <input type="number" id="gmax" name="max_players" value="6" min="2" max="20">
+
+    <button type="submit">Add game</button>
+  </form>
+</div>
+
+<h2>{{ games|length }} game{{ '' if games|length == 1 else 's' }}</h2>
+
+{% for g in games %}
+<div class="card">
+  <form method="post" action="/admin/games/{{ g.id }}" enctype="multipart/form-data">
+    <div style="display:flex; gap:1rem; align-items:flex-start">
+      <div>
+        {% if g.has_image %}
+          <img src="/games/{{ g.id }}/image" alt=""
+               style="width:72px;height:72px;object-fit:cover;border-radius:8px;display:block">
+        {% else %}
+          <div class="gamecard-noimage">🎲</div>
+        {% endif %}
+      </div>
+      <div style="flex:1">
+        <input type="text" name="name" value="{{ g.name }}" required maxlength="60">
+        <div class="muted" style="font-size:.75rem; margin-top:.4rem">
+          {% if g.times_played %}
+            played {{ g.times_played }} time{{ '' if g.times_played == 1 else 's' }}
+          {% else %}
+            never played
+          {% endif %}
+          {% if not g.active %} · <span style="color:#f0b9c6">retired</span>{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <label>Description</label>
+    <textarea name="description" maxlength="300">{{ g.description or '' }}</textarea>
+
+    <label>Replace picture {% if g.has_image %}<span class="muted">(leave empty to keep the current one)</span>{% endif %}</label>
+    <input type="file" name="picture" accept="image/*">
+
+    <label>Typical duration (minutes)</label>
+    <input type="number" name="duration_minutes" min="1" max="600"
+           value="{{ g.duration_minutes or '' }}" placeholder="Not sure">
+
+    <label>Mode</label>
+    <select name="mode">
+      <option value="ffa"  {% if g.mode == 'ffa'  %}selected{% endif %}>Free-for-all</option>
+      <option value="duel" {% if g.mode == 'duel' %}selected{% endif %}>Head to head</option>
+      <option value="team" {% if g.mode == 'team' %}selected{% endif %}>Teams</option>
+    </select>
+
+    <label>Min players</label>
+    <input type="number" name="min_players" value="{{ g.min_players }}" min="2" max="20">
+    <label>Max players</label>
+    <input type="number" name="max_players" value="{{ g.max_players }}" min="2" max="20">
+
+    <label style="display:flex;align-items:center;gap:.5rem;margin-top:.75rem;color:var(--ink)">
+      <input type="checkbox" name="active" {% if g.active %}checked{% endif %}
+             style="width:auto;accent-color:var(--accent)">
+      Offered for sign-up
+    </label>
+
+    <button type="submit">Save</button>
+  </form>
+
+  <form method="post" action="/admin/games/{{ g.id }}/delete" style="margin-top:.5rem"
+        onsubmit="return confirm({% if g.times_played %}'{{ g.name }} has been played {{ g.times_played }} time(s). It will be retired from sign-ups, not deleted — its history and leaderboard stay. Continue?'{% else %}'Delete {{ g.name }} permanently? It has never been played, so nothing is lost.'{% endif %});">
+    <button type="submit" class="ghost" style="color:#e08c9e; border-color:#5a3440">
+      {% if g.times_played %}Retire{% else %}Delete{% endif %}
+    </button>
+  </form>
+</div>
+{% endfor %}
+
+{% endblock %}

@@ -1,3 +1,4 @@
+Pillow
 fastapi
 jinja2
 psycopg[binary]

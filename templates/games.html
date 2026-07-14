@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Games{% endblock %}
+{% block content %}
+
+<h1>What we play</h1>
+<p class="muted">{{ games|length }} game{{ '' if games|length == 1 else 's' }} in rotation.</p>
+
+{% if is_admin(request) %}
+  <div class="card" style="display:flex; align-items:center; gap:1rem">
+    <span class="muted" style="flex:1; font-size:.9rem">You're signed in as admin.</span>
+    <a href="/admin/games"><button type="button" class="ghost">Edit games</button></a>
+  </div>
+{% endif %}
+
+<div class="gamelist">
+  {% for g in games %}
+    <div class="gamecard" style="cursor:default">
+      <div class="gamecard-media">
+        {% if g.has_image %}
+          <img src="/games/{{ g.id }}/image" alt="{{ g.name }}" loading="lazy">
+        {% else %}
+          <div class="gamecard-noimage">🎲</div>
+        {% endif %}
+      </div>
+      <div class="gamecard-body">
+        <strong>{{ g.name }}</strong>
+        <div class="muted" style="font-size:.75rem">
+          {{ g.min_players }}–{{ g.max_players }} players ·
+          {% if g.mode == 'ffa' %}free-for-all{% elif g.mode == 'duel' %}head to head{% else %}teams{% endif %}
+          {% if g.duration_minutes %} · ~{{ g.duration_minutes }} min{% endif %}
+        </div>
+        {% if g.description %}
+          <p class="muted" style="font-size:.85rem; margin:.4rem 0 0">{{ g.description }}</p>
+        {% endif %}
+      </div>
+    </div>
+  {% endfor %}
+</div>
+
+{% if not games %}
+  <div class="card"><p class="muted" style="margin:0">No games yet.</p></div>
+{% endif %}
+
+{% endblock %}

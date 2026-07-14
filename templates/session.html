@@ -18,33 +18,84 @@
   <div class="flash">You're in, {{ joined }}. Change your mind any time — just submit again.</div>
 {% endif %}
 
+{% if error %}
+  <div class="flash warn">{{ error }}</div>
+{% endif %}
+
 {% if session.status == 'open' %}
-<div class="card">
-  <form method="post" action="/s/{{ session.slug }}/signup">
+<form method="post" action="/s/{{ session.slug }}/signup" id="signup-form">
+
+  <div class="card">
     <label for="name">Your name</label>
     <input type="text" id="name" name="name" list="known-players" maxlength="40"
-           required autocomplete="off" placeholder="Type your name">
+           required autocomplete="off" placeholder="Type your name"
+           value="{{ form_name }}">
     <datalist id="known-players">
       {% for p in players %}<option value="{{ p.name }}">{% endfor %}
     </datalist>
+  </div>
 
-    <label>Games you fancy</label>
-    <div class="games">
-      {% for g in games %}
-        <label>
-          <input type="checkbox" name="game_ids" value="{{ g.id }}">
-          {{ g.name }}
-        </label>
-      {% endfor %}
-    </div>
+  <h2>Pick your games <span class="muted" style="font-weight:400">— at least {{ min_votes }}</span></h2>
 
+  <div class="gamelist">
+    {% for g in games %}
+      <label class="gamecard" for="game-{{ g.id }}">
+        <input type="checkbox" id="game-{{ g.id }}" name="game_ids" value="{{ g.id }}"
+               {% if g.id|string in form_games %}checked{% endif %}>
+        <div class="gamecard-media">
+          {% if g.has_image %}
+            <img src="/games/{{ g.id }}/image" alt="{{ g.name }}" loading="lazy">
+          {% else %}
+            <div class="gamecard-noimage">🎲</div>
+          {% endif %}
+        </div>
+        <div class="gamecard-body">
+          <strong>{{ g.name }}</strong>
+          <div class="muted" style="font-size:.75rem">
+            {{ g.min_players }}–{{ g.max_players }} players ·
+            {% if g.mode == 'ffa' %}free-for-all{% elif g.mode == 'duel' %}head to head{% else %}teams{% endif %}
+            {% if g.duration_minutes %} · ~{{ g.duration_minutes }} min{% endif %}
+          </div>
+          {% if g.description %}
+            <p class="muted" style="font-size:.85rem; margin:.4rem 0 0">{{ g.description }}</p>
+          {% endif %}
+        </div>
+        <span class="gamecard-tick" aria-hidden="true">✓</span>
+      </label>
+    {% endfor %}
+  </div>
+
+  <div class="card">
     <label for="note">Anything to add? (optional)</label>
     <input type="text" id="note" name="note" maxlength="120"
-           placeholder="Might be 20 mins late">
+           placeholder="Might be 20 mins late" value="{{ form_note }}">
 
-    <button type="submit">I'm in</button>
-  </form>
-</div>
+    <button type="submit" id="submit-btn" disabled>
+      Pick {{ min_votes }} games to continue
+    </button>
+    <p class="muted" style="font-size:.8rem; margin:.5rem 0 0" id="vote-hint"></p>
+  </div>
+</form>
+
+<script>
+  // Convenience only. The real check is on the server — this just stops people
+  // submitting a form that was always going to be rejected.
+  const MIN = {{ min_votes }};
+  const form = document.getElementById('signup-form');
+  const btn = document.getElementById('submit-btn');
+  const hint = document.getElementById('vote-hint');
+
+  function refresh() {
+    const n = form.querySelectorAll('input[name=game_ids]:checked').length;
+    const ok = n >= MIN;
+    btn.disabled = !ok;
+    btn.textContent = ok ? "I'm in" : `Pick ${MIN - n} more game${MIN - n === 1 ? '' : 's'}`;
+    hint.textContent = n === 0 ? '' : `${n} selected`;
+  }
+
+  form.addEventListener('change', refresh);
+  refresh();
+</script>
 {% endif %}
 
 <h2>Coming ({{ signups|length }})</h2>
@@ -56,7 +107,6 @@
       {% if s.note %}<span class="muted"> — {{ s.note }}</span>{% endif %}
       <div style="margin-top:.4rem">
         {% for g in s.game_names %}<span class="pill">{{ g }}</span>{% endfor %}
-        {% if not s.game_names %}<span class="muted" style="font-size:.85rem">no game preference</span>{% endif %}
       </div>
       {% if session.status == 'open' %}
       <form method="post" action="/s/{{ session.slug }}/withdraw" style="margin-top:.5rem">
@@ -81,9 +131,7 @@
           {{ t.name }}
           <div class="muted" style="font-size:.75rem">{{ t.min_players }}–{{ t.max_players }} players</div>
         </td>
-        <td>
-          <div class="bar" style="width: {{ (t.votes / top * 100)|round|int }}%"></div>
-        </td>
+        <td><div class="bar" style="width: {{ (t.votes / top * 100)|round|int }}%"></div></td>
         <td style="text-align:right; width:3rem" class="muted">{{ t.votes }}</td>
       </tr>
     {% endfor %}

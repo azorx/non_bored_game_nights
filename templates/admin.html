@@ -37,26 +37,12 @@
   </div>
 {% endfor %}
 
-<h2>Games ({{ games|length }})</h2>
+<h2>Games</h2>
 <div class="card">
-  <form method="post" action="/admin/games">
-    <label for="gname">Name</label>
-    <input type="text" id="gname" name="name" required maxlength="60">
-    <label for="mode">Mode</label>
-    <select id="mode" name="mode">
-      <option value="ffa">Free-for-all</option>
-      <option value="duel">Head to head</option>
-      <option value="team">Teams</option>
-    </select>
-    <label for="min_players">Min players</label>
-    <input type="number" id="min_players" name="min_players" value="2" min="2" max="20">
-    <label for="max_players">Max players</label>
-    <input type="number" id="max_players" name="max_players" value="6" min="2" max="20">
-    <button type="submit">Add game</button>
-  </form>
-</div>
-<div class="card">
-  {% for g in games %}<span class="pill">{{ g.name }} · {{ g.mode }}</span>{% endfor %}
+  <p class="muted" style="margin:0 0 .5rem">
+    {{ games|length }} game{{ '' if games|length == 1 else 's' }} offered.
+  </p>
+  <a href="/admin/games"><button type="button">Manage games and pictures</button></a>
 </div>
 
 {% endblock %}

@@ -47,9 +47,34 @@
       background: var(--accent); color: #fff; font-size: 1rem; font-weight: 600; cursor: pointer;
     }
     button.ghost { background: transparent; border: 1px solid var(--line); color: var(--muted); font-weight: 400; font-size: 0.85rem; padding: 0.3rem 0.7rem; margin: 0; }
-    .games { display: grid; grid-template-columns: 1fr 1fr; gap: 0.4rem; margin-top: 0.25rem; }
-    .games label { display: flex; align-items: center; gap: 0.5rem; margin: 0; padding: 0.55rem 0.7rem; border: 1px solid var(--line); border-radius: 8px; color: var(--ink); font-size: 0.9rem; cursor: pointer; }
-    .games input { accent-color: var(--accent); }
+    .gamelist { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 0.75rem; }
+    .gamecard {
+      position: relative; display: flex; gap: 0.9rem; align-items: flex-start; margin: 0;
+      background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+      padding: 0.85rem; cursor: pointer; transition: border-color .12s, background .12s;
+    }
+    .gamecard:hover { border-color: #46425c; }
+    /* The checkbox is hidden but still the real control — clicking anywhere on
+       the card toggles it, because the whole card is a <label> for it. */
+    .gamecard input { position: absolute; opacity: 0; pointer-events: none; }
+    .gamecard:has(input:checked) { border-color: var(--accent); background: #221f33; }
+    .gamecard-media { flex: 0 0 72px; }
+    .gamecard-media img { width: 72px; height: 72px; object-fit: cover; border-radius: 8px; display: block; }
+    .gamecard-noimage { width: 72px; height: 72px; border-radius: 8px; background: #262332; display: flex; align-items: center; justify-content: center; font-size: 1.6rem; }
+    .gamecard-body { flex: 1; min-width: 0; }
+    .gamecard-tick {
+      flex: 0 0 22px; width: 22px; height: 22px; border-radius: 50%;
+      border: 1px solid var(--line); display: flex; align-items: center; justify-content: center;
+      font-size: 0.75rem; color: transparent; align-self: center;
+    }
+    .gamecard:has(input:checked) .gamecard-tick { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button:disabled { background: #33304a; color: var(--muted); cursor: not-allowed; }
+    textarea {
+      width: 100%; padding: 0.6rem 0.75rem; border-radius: 8px; min-height: 4.5rem;
+      border: 1px solid var(--line); background: #17161f; color: var(--ink);
+      font: inherit; font-size: 0.95rem; resize: vertical;
+    }
+    input[type=file] { width: 100%; font-size: 0.85rem; color: var(--muted); }
     .bar { height: 6px; background: var(--accent); border-radius: 99px; }
     table { width: 100%; border-collapse: collapse; }
     td, th { text-align: left; padding: 0.5rem 0; border-bottom: 1px solid var(--line); font-size: 0.95rem; }
@@ -62,8 +87,9 @@
       <a class="brand" href="/">🎲 Non-Bored Game Nights</a>
       <nav>
         <a href="/">Home</a>
+        <a href="/games">Games</a>
         <a href="/players">Players</a>
-        <a href="/admin">Admin</a>
+        {% if is_admin(request) %}<a href="/admin">Admin</a>{% endif %}
       </nav>
     </header>
     {% block content %}{% endblock %}
