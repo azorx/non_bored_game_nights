@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>Admin</h1>
+
+<h2>New game night</h2>
+<div class="card">
+  <form method="post" action="/admin/sessions">
+    <label for="title">Title</label>
+    <input type="text" id="title" name="title" required
+           placeholder="Thursday session" maxlength="60">
+    <label for="scheduled_for">When</label>
+    <input type="datetime-local" id="scheduled_for" name="scheduled_for" required>
+    <label for="location">Where</label>
+    <input type="text" id="location" name="location" placeholder="Mine, 7pm" maxlength="60">
+    <button type="submit">Create and get the link</button>
+  </form>
+</div>
+
+<h2>Game nights</h2>
+{% for s in sessions %}
+  <div class="card">
+    <strong>{{ s.title }}</strong>
+    <span class="pill">{{ s.status }}</span>
+    <span class="pill">{{ s.signup_count }} in</span>
+    <div class="muted" style="font-size:.85rem">
+      {{ s.scheduled_for.strftime('%a %-d %b, %H:%M') }} ·
+      <a href="/s/{{ s.slug }}" style="color:var(--accent)">/s/{{ s.slug }}</a>
+    </div>
+    <form method="post" action="/admin/sessions/{{ s.id }}/status" style="margin-top:.5rem">
+      {% for st in ['open', 'closed', 'played'] %}
+        {% if st != s.status %}
+          <button type="submit" name="status" value="{{ st }}" class="ghost">Mark {{ st }}</button>
+        {% endif %}
+      {% endfor %}
+    </form>
+  </div>
+{% endfor %}
+
+<h2>Games ({{ games|length }})</h2>
+<div class="card">
+  <form method="post" action="/admin/games">
+    <label for="gname">Name</label>
+    <input type="text" id="gname" name="name" required maxlength="60">
+    <label for="mode">Mode</label>
+    <select id="mode" name="mode">
+      <option value="ffa">Free-for-all</option>
+      <option value="duel">Head to head</option>
+      <option value="team">Teams</option>
+    </select>
+    <label for="min_players">Min players</label>
+    <input type="number" id="min_players" name="min_players" value="2" min="2" max="20">
+    <label for="max_players">Max players</label>
+    <input type="number" id="max_players" name="max_players" value="6" min="2" max="20">
+    <button type="submit">Add game</button>
+  </form>
+</div>
+<div class="card">
+  {% for g in games %}<span class="pill">{{ g.name }} · {{ g.mode }}</span>{% endfor %}
+</div>
+
+{% endblock %}

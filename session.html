@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ session.title }}{% endblock %}
+{% block og_title %}{{ session.title }}{% endblock %}
+{% block og_desc %}{{ session.scheduled_for.strftime('%a %-d %b, %H:%M') }}{% if session.location %} · {{ session.location }}{% endif %} — tap to sign up.{% endblock %}
+{% block content %}
+
+<h1>{{ session.title }}</h1>
+<p class="muted">
+  {{ session.scheduled_for.strftime('%A %-d %B, %H:%M') }}
+  {% if session.location %} · {{ session.location }}{% endif %}
+</p>
+
+{% if session.status != 'open' %}
+  <div class="flash warn">Sign-ups are closed for this one.</div>
+{% endif %}
+
+{% if joined %}
+  <div class="flash">You're in, {{ joined }}. Change your mind any time — just submit again.</div>
+{% endif %}
+
+{% if session.status == 'open' %}
+<div class="card">
+  <form method="post" action="/s/{{ session.slug }}/signup">
+    <label for="name">Your name</label>
+    <input type="text" id="name" name="name" list="known-players" maxlength="40"
+           required autocomplete="off" placeholder="Type your name">
+    <datalist id="known-players">
+      {% for p in players %}<option value="{{ p.name }}">{% endfor %}
+    </datalist>
+
+    <label>Games you fancy</label>
+    <div class="games">
+      {% for g in games %}
+        <label>
+          <input type="checkbox" name="game_ids" value="{{ g.id }}">
+          {{ g.name }}
+        </label>
+      {% endfor %}
+    </div>
+
+    <label for="note">Anything to add? (optional)</label>
+    <input type="text" id="note" name="note" maxlength="120"
+           placeholder="Might be 20 mins late">
+
+    <button type="submit">I'm in</button>
+  </form>
+</div>
+{% endif %}
+
+<h2>Coming ({{ signups|length }})</h2>
+
+{% if signups %}
+  {% for s in signups %}
+    <div class="card">
+      <strong>{{ s.emoji }} {{ s.name }}</strong>
+      {% if s.note %}<span class="muted"> — {{ s.note }}</span>{% endif %}
+      <div style="margin-top:.4rem">
+        {% for g in s.game_names %}<span class="pill">{{ g }}</span>{% endfor %}
+        {% if not s.game_names %}<span class="muted" style="font-size:.85rem">no game preference</span>{% endif %}
+      </div>
+      {% if session.status == 'open' %}
+      <form method="post" action="/s/{{ session.slug }}/withdraw" style="margin-top:.5rem">
+        <input type="hidden" name="player_id" value="{{ s.player_id }}">
+        <button type="submit" class="ghost">Can't make it</button>
+      </form>
+      {% endif %}
+    </div>
+  {% endfor %}
+{% else %}
+  <div class="card"><p class="muted" style="margin:0">Nobody yet. Be the first.</p></div>
+{% endif %}
+
+{% if tally %}
+<h2>The vote</h2>
+<div class="card">
+  <table>
+    {% set top = tally[0].votes %}
+    {% for t in tally %}
+      <tr>
+        <td style="width:45%">
+          {{ t.name }}
+          <div class="muted" style="font-size:.75rem">{{ t.min_players }}–{{ t.max_players }} players</div>
+        </td>
+        <td>
+          <div class="bar" style="width: {{ (t.votes / top * 100)|round|int }}%"></div>
+        </td>
+        <td style="text-align:right; width:3rem" class="muted">{{ t.votes }}</td>
+      </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>What's on</h1>
+<p class="muted">{{ player_count }} player{{ '' if player_count == 1 else 's' }} on the books.</p>
+
+{% if upcoming %}
+  {% for s in upcoming %}
+    <div class="card">
+      <a href="/s/{{ s.slug }}">
+        <strong>{{ s.title }}</strong><br>
+        <span class="muted">
+          {{ s.scheduled_for.strftime('%a %-d %b, %H:%M') }}
+          {% if s.location %} · {{ s.location }}{% endif %}
+        </span>
+      </a>
+      <div style="margin-top:.5rem">
+        <span class="pill">{{ s.signup_count }} signed up</span>
+        <span class="pill">/s/{{ s.slug }}</span>
+      </div>
+    </div>
+  {% endfor %}
+{% else %}
+  <div class="card">
+    <p class="muted" style="margin:0">
+      Nothing scheduled. Head to <a href="/admin" style="color:var(--accent)">admin</a> to create a game night.
+    </p>
+  </div>
+{% endif %}
+
+{% endblock %}

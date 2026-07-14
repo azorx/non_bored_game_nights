@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Admin</h1>
+{% if bad %}<div class="flash warn">Wrong passcode.</div>{% endif %}
+<div class="card">
+  <form method="post" action="/admin/login">
+    <label for="passcode">Passcode</label>
+    <input type="password" id="passcode" name="passcode" required autocomplete="current-password">
+    <button type="submit">Let me in</button>
+  </form>
+</div>
+{% endblock %}

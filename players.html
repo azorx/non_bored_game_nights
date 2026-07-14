@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h1>Players</h1>
+
+{% if created %}
+  <div class="flash">{{ created }} is in the book.</div>
+{% endif %}
+
+<div class="card">
+  <form method="post" action="/players">
+    <label for="name">Name</label>
+    <input type="text" id="name" name="name" maxlength="40" required autocomplete="off">
+    <label for="emoji">Emoji</label>
+    <input type="text" id="emoji" name="emoji" value="🎲" maxlength="8">
+    <button type="submit">Add player</button>
+  </form>
+</div>
+
+{% if players %}
+<div class="card">
+  <table>
+    <tr><th>Who</th><th style="text-align:right">Nights signed up</th></tr>
+    {% for p in players %}
+      <tr>
+        <td>{{ p.emoji }} {{ p.name }}</td>
+        <td style="text-align:right" class="muted">{{ p.nights_attended }}</td>
+      </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+
+<p class="muted">
+  You rarely need this page — people are created automatically when they sign up
+  for a night. It is here for backfilling old regulars.
+</p>
+
+{% endblock %}
