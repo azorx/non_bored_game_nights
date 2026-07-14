@@ -12,8 +12,8 @@
   <div class="card"><p class="muted" style="margin:0">No games yet.</p></div>
 {% else %}
 
-{# ---- Titles currently held ------------------------------------------------ #}
-<h2>Titles held</h2>
+{# ---- Titles --------------------------------------------------------------- #}
+<h2>Titles</h2>
 {% if titles %}
   <div class="card">
     <table>
@@ -24,15 +24,19 @@
             {% if t.subtitle %}<div class="muted" style="font-size:.75rem">{{ t.subtitle }}</div>{% endif %}
           </td>
           <td>
-            <span style="font-size:1.15rem; margin-right:.35rem">{{ t.holder.emoji }}</span>{{ t.holder.name }}
+            {% if t.holder %}
+              <span style="font-size:1.15rem; margin-right:.35rem">{{ t.holder.emoji }}</span>{{ t.holder.name }}
+            {% else %}
+              <span class="muted">— unclaimed —</span>
+            {% endif %}
           </td>
-          <td style="text-align:right" class="muted">{{ t.detail }}</td>
+          <td style="text-align:right" class="muted">{{ t.detail or '' }}</td>
         </tr>
       {% endfor %}
     </table>
   </div>
 {% else %}
-  <div class="card"><p class="muted" style="margin:0">No titles held yet — play some games and record the results.</p></div>
+  <div class="card"><p class="muted" style="margin:0">No titles yet — play some games or add an award.</p></div>
 {% endif %}
 
 {# ---- Per-game board ------------------------------------------------------- #}

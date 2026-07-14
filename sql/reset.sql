@@ -21,6 +21,8 @@ truncate table
     match_players,   -- who finished where in each match
     matches,         -- the matches themselves (the source of every rating)
     ratings,         -- the leaderboard cache (rebuilt from matches)
+    session_awards,  -- who held each award on each night
+    award_types,     -- the registry of celebratory awards
     signup_games,    -- game votes
     signups,         -- who signed up for which night
     sessions,        -- the game nights

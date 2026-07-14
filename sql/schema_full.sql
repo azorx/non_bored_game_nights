@@ -152,3 +152,25 @@ create table if not exists ratings (
     updated_at   timestamptz      not null default now(),
     primary key (player_id, game_id)
 );
+
+
+-- ---------------------------------------------------------------------------
+-- Celebratory awards — the non-game titles (e.g. Professional Snacker).
+-- award_types is the persistent registry the admin manages; session_awards
+-- records who held each award on each night. Removing an award type cascades
+-- its winners away.
+-- ---------------------------------------------------------------------------
+
+create table if not exists award_types (
+    name       text        primary key,
+    created_at timestamptz not null default now()
+);
+
+create table if not exists session_awards (
+    session_id uuid        not null references sessions (id) on delete cascade,
+    award      text        not null references award_types (name)
+                           on update cascade on delete cascade,
+    player_id  uuid        not null references players (id)  on delete cascade,
+    created_at timestamptz not null default now(),
+    primary key (session_id, award)
+);

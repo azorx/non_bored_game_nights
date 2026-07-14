@@ -477,6 +477,45 @@ def compute_titles() -> list[dict]:
                 }
             )
 
+    # Celebratory, non-game titles — every registered award, in order. Persistent:
+    # an award with no winner yet still appears, unclaimed. The belt goes to
+    # whoever has won it on the most nights. New awards the admin registers show
+    # up here with no code change at all.
+    for row in db.fetch_all(
+        """
+        select at.name as award, w.name as holder_name,
+               w.emoji as holder_emoji, w.wins
+        from award_types at
+        left join lateral (
+            select p.name, p.emoji, count(*) as wins
+            from session_awards a
+            join players p on p.id = a.player_id
+            where a.award = at.name
+            group by p.id
+            order by count(*) desc, lower(p.name)
+            limit 1
+        ) w on true
+        order by lower(at.name)
+        """
+    ):
+        holder = (
+            {"name": row["holder_name"], "emoji": row["holder_emoji"]}
+            if row["holder_name"]
+            else None
+        )
+        titles.append(
+            {
+                "title": row["award"],
+                "subtitle": "Most nights awarded",
+                "holder": holder,
+                "detail": (
+                    f"{row['wins']} night{'' if row['wins'] == 1 else 's'}"
+                    if holder
+                    else None
+                ),
+            }
+        )
+
     for g in db.fetch_all(
         "select id, name, mode from games_summary order by lower(name)"
     ):
@@ -813,10 +852,32 @@ def admin_page(request: Request, deleted: str | None = None):
         order by s.scheduled_for desc
         """
     )
+
+    # Award types are managed independently in the registry below; each one is a
+    # winner field on every night's card.
+    award_types = [
+        r["name"]
+        for r in db.fetch_all("select name from award_types order by lower(name)")
+    ]
+    # Who currently holds each award on each night: {session_id: {award: player}}.
+    winners: dict = {}
+    for r in db.fetch_all("select session_id, award, player_id from session_awards"):
+        winners.setdefault(r["session_id"], {})[r["award"]] = r["player_id"]
+    for s in sessions:
+        s["award_winners"] = winners.get(s["id"], {})
+
     return templates.TemplateResponse(
         request=request,
         name="admin.html",
-        context={"sessions": sessions, "games": active_games(), "deleted": deleted},
+        context={
+            "sessions": sessions,
+            "games": active_games(),
+            "players": db.fetch_all(
+                "select id, name, emoji from players order by lower(name)"
+            ),
+            "award_types": award_types,
+            "deleted": deleted,
+        },
     )
 
 
@@ -844,6 +905,64 @@ def set_session_status(session_id: str, status: str = Form(...)):
     if status not in {"open", "closed", "played"}:
         raise HTTPException(status_code=400, detail="Unknown status")
     db.execute("update sessions set status = %s where id = %s", [status, session_id])
+    return redirect("/admin")
+
+
+@app.post("/admin/awards", dependencies=[Depends(require_admin)])
+def add_award_type(name: str = Form(...)):
+    """Register a persistent award. It immediately becomes a winner field on
+    every night's card and a title on the leaderboard — unclaimed until someone
+    wins it. The name doubles as the title shown on the leaderboard."""
+    name = " ".join((name or "").split())  # collapse stray whitespace
+    if not name:
+        raise HTTPException(status_code=400, detail="An award needs a name")
+    if len(name) > 40:
+        raise HTTPException(status_code=400, detail="That award name is too long")
+    db.execute(
+        "insert into award_types (name) values (%s) on conflict do nothing", [name]
+    )
+    return redirect("/admin")
+
+
+@app.post("/admin/awards/delete", dependencies=[Depends(require_admin)])
+def delete_award_type(name: str = Form(...)):
+    """Remove an award from the registry. Its recorded winners cascade away with
+    it, so it disappears from the leaderboard and every session card at once."""
+    db.execute("delete from award_types where name = %s", [name])
+    return redirect("/admin")
+
+
+@app.post("/admin/sessions/{session_id}/award", dependencies=[Depends(require_admin)])
+def set_session_award(
+    session_id: str, award: str = Form(...), player_id: str = Form("")
+):
+    """Record, change or clear who won a registered award on one night.
+
+    The award must already exist in the registry (the field is only rendered for
+    registered awards, and the foreign key enforces it). An empty player means
+    "nobody won it tonight" and clears any previous pick, so a mistaken tap is
+    easy to undo.
+    """
+    award = " ".join((award or "").split())  # collapse stray whitespace
+    if not award:
+        raise HTTPException(status_code=400, detail="An award needs a name")
+
+    player_id = (player_id or "").strip()
+    if player_id:
+        db.execute(
+            """
+            insert into session_awards (session_id, award, player_id)
+            values (%s, %s, %s)
+            on conflict (session_id, award)
+            do update set player_id = excluded.player_id
+            """,
+            [session_id, award, player_id],
+        )
+    else:
+        db.execute(
+            "delete from session_awards where session_id = %s and award = %s",
+            [session_id, award],
+        )
     return redirect("/admin")
 
 

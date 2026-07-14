@@ -40,7 +40,26 @@
         {% endif %}
       {% endfor %}
     </form>
-    <form method="post" action="/admin/sessions/{{ s.id }}/delete" style="margin-top:.25rem"
+
+    {# One winner field per registered award. Manage the list of awards in the
+       Awards section further down; this just records who won each one tonight. #}
+    {% for award in award_types %}
+      <form method="post" action="/admin/sessions/{{ s.id }}/award" style="margin-top:.5rem">
+        <input type="hidden" name="award" value="{{ award }}">
+        <label style="margin-top:0">🏅 {{ award }}</label>
+        <div style="display:flex; gap:.5rem; align-items:center">
+          <select name="player_id" style="flex:1">
+            <option value="">— nobody —</option>
+            {% for p in players %}
+              <option value="{{ p.id }}" {% if p.id == s.award_winners.get(award) %}selected{% endif %}>{{ p.emoji }} {{ p.name }}</option>
+            {% endfor %}
+          </select>
+          <button type="submit" class="ghost" style="margin:0">Save</button>
+        </div>
+      </form>
+    {% endfor %}
+
+    <form method="post" action="/admin/sessions/{{ s.id }}/delete" style="margin-top:.5rem"
           onsubmit="return confirm('Delete “{{ s.title }}” and every result played that night? The leaderboards will be recalculated as if it never happened.');">
       <button type="submit" class="ghost" style="color:#e08c9e; border-color:#5a3440">Delete night</button>
     </form>
@@ -53,6 +72,41 @@
     Enter who won and update the Elo ladder.
   </p>
   <a href="/admin/results"><button type="button">Enter results</button></a>
+</div>
+
+<h2>Awards</h2>
+<div class="card">
+  <p class="muted" style="margin:0 0 .5rem">
+    Persistent celebratory titles, shown on the leaderboard. Each one becomes a
+    winner field on every game night above. Removing an award also erases who won
+    it.
+  </p>
+
+  {% if award_types %}
+    <div class="gamelist" style="margin-bottom:.75rem">
+      {% for award in award_types %}
+        <div class="card" style="display:flex; align-items:center; gap:.75rem; margin:0; padding:.6rem .85rem">
+          <span style="flex:1">🏅 {{ award }}</span>
+          <form method="post" action="/admin/awards/delete" style="margin:0"
+                onsubmit="return confirm('Remove the “{{ award }}” award? Every recorded winner of it is deleted too.');">
+            <input type="hidden" name="name" value="{{ award }}">
+            <button type="submit" class="ghost" style="color:#e08c9e; border-color:#5a3440; margin:0">Remove</button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="margin:0 0 .75rem">No awards yet.</p>
+  {% endif %}
+
+  <form method="post" action="/admin/awards">
+    <label for="award-name">New award</label>
+    <div style="display:flex; gap:.5rem; align-items:center; flex-wrap:wrap">
+      <input type="text" id="award-name" name="name" required maxlength="40"
+             placeholder="e.g. Professional Snacker 🍿" style="flex:1 1 12rem">
+      <button type="submit" style="margin:0">Add award</button>
+    </div>
+  </form>
 </div>
 
 <h2>Games</h2>
